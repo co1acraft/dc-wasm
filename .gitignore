@@ -1,0 +1,21 @@
+# Toolchains / third-party sources fetched by scripts/00_setup.sh
+/vendor/
+
+# Build outputs
+/build/
+/web/deadcells.js
+/web/deadcells.wasm
+/web/deadcells.worker.js
+/web/*.data
+/web/browser.log
+
+# Proprietary game files -- NEVER commit these. Bring your own copy.
+*.pak
+hlboot.dat
+res.pak
+
+# misc
+*.o
+*.wo
+*.tmp
+.DS_Store

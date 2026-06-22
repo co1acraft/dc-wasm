@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Dead Cells (WASM)</title></head>
+<body style="margin:0;background:#111">
+<canvas id="canvas" width="1280" height="720" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+<script>
+// Console -> server (so headless runs can capture output) AND devtools.
+function rlog(s){ try{ fetch('/log',{method:'POST',body:String(s)}); }catch(e){} try{ console.log(s); }catch(e){} }
+window.onerror = function(m,src,l,c,e){ rlog('[onerror] '+m+' @'+src+':'+l+(e&&e.stack?'\n'+e.stack:'')); };
+rlog('[harness] start');
+var Module = {
+  canvas: document.getElementById('canvas'),
+  arguments: [],
+  thisProgram: '/data/deadcells',
+  ENV: { '_': '/data/deadcells' },         // so the game derives froot=/data
+  print:    function(s){ rlog('[out] '+s); },
+  printErr: function(s){ rlog('[err] '+s); },
+  onRuntimeInitialized: function(){ rlog('[harness] runtime initialized'); },
+  onAbort: function(w){ rlog('[abort] '+w); },
+};
+</script>
+<script src="deadcells.js"></script>
+</body>
+</html>
