@@ -14,8 +14,9 @@ echo "compiling generated C (this can take a few minutes)..."
 objs=()
 for c in "$DC"/dc_types.c "$DC"/dc_main.c "$DC"/dc_stubs.c "$DC"/dc_f*.c \
          "$REPO/runtime/ssl_impl.c" "$HL/libs/ui/ui_stub.c" "$BUILD/sdl_native_stubs.c"; do
-  o="$BUILD/$(basename "$c").o"
-  $cc -c "$c" -o "$o" & objs+=("$o")
+  o="$BUILD/$(basename "$c").o"; objs+=("$o")
+  [ -f "$o" ] && [ "$o" -nt "$c" ] && continue   # cached
+  $cc -c "$c" -o "$o" &
   # limit parallelism
   while [ "$(jobs -r | wc -l)" -ge "$(nproc)" ]; do wait -n; done
 done

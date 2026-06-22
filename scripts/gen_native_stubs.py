@@ -4,6 +4,9 @@
 # Reads build/dc/dc.h, writes the stubs to stdout.
 import re, sys
 hdr = sys.argv[1]
+# dc.h provides the HL type definitions (vdynamic, vbyte, bool, ...) and the
+# HL_API sdl_* prototypes these stubs must match.
+print('#include "dc.h"')
 for line in open(hdr):
     m = re.match(r'\s*HL_API\s+(.+?)\s+(sdl_\w+)\s*\((.*)\)\s*;', line)
     if not m:
