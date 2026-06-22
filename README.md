@@ -127,23 +127,28 @@ so OffscreenCanvas can't be used); `gl.c` in `HL_GLES` mode; per-subsystem
 rewriting (`#version 300 es`, reserved-word rename, `layout(location=)` for MRT).
 
 **Known issues / WIP**
-- **The GC is the remaining blocker.** It's disabled (it *leaks* → `Out of
-  Memory` during heavy asset/audio init, before a frame is presented). HashLink's
-  conservative GC can't see pointers held in wasm locals (not on the
-  linear-memory shadow stack), so enabling it collects live objects mid-use.
-  Explored fixes:
-  - Binaryen's **`--spill-pointers`** (the standard fix) *does* work if the link
-    keeps the name section (`-g2`, so the pass can find `__stack_pointer`) — but
-    it bloats this module ~9× (46 MB → **423 MB**) and produces a single **94 MB
-    function that exceeds V8's 7.65 MB per-function limit** (HashLink's giant
-    entrypoint). Unusable as-is.
-  - A manual "collect at a safe point" scheme isn't viable: HashLink runs one
-    deep blocking main loop, so there's no shallow-stack moment where a
-    conservative collection is safe.
-  - **Real fix (transpiler-level, the main open task):** split the oversized
-    functions so `--spill-pointers` fits per function, and/or have `bc2c` emit
-    precise rooting (force GC-managed pointer registers onto the shadow stack so
-    the conservative scan finds them).
+- **The GC is the remaining blocker** (HashLink's conservative GC can't see
+  pointers held in wasm locals, which aren't on the linear-memory shadow stack).
+  Status of the fixes explored:
+  - Binaryen's **`--spill-pointers`** *works* (with `-g2` so it finds
+    `__stack_pointer`) but bloats the module ~9× (46 MB → **423 MB**) with a
+    single **94 MB function over V8's 7.65 MB limit** (the giant entrypoint).
+    Unusable.
+  - **`bc2c` now emits precise rooting** (build with `GC_ROOTS=1`): it forces
+    GC-managed pointer registers onto the shadow stack at function entry — same
+    effect as spill-pointers but once per function, so **no size explosion**
+    (46 MB → 58 MB). This makes the **generated code** GC-correct.
+  - The remaining gap is the **libhl runtime + native** code (maps, arrays, fmt,
+    SDL…), whose pointers also sit in wasm locals. Compiling them `-O1` →
+    under-rooting (a live `hxsl.Shader` gets collected → "Can't cast … to Shader").
+    Compiling them `-O0` (locals land on the shadow stack) fixes that and the
+    game runs **through "1291 shaders loaded"**, but `-O0` puts so many
+    pointer-looking values on the stack that the conservative scan falsely roots
+    *everything* (`gc_major` frees nothing) → OOM during asset load.
+  - **Real fix:** precise rooting for libhl/native too (spill-pointers only the
+    pointer locals — but it can't be applied to libhl-only within one module, so
+    this needs source-level rooting or a side-module split), and likely
+    `MEMORY64` to clear the 4 GB wasm32 ceiling for DC's asset load.
 - **Rendering is browser-only.** node has no canvas/WebGL, so the node build
   stops at SDL init (`screen is not defined`) — expected.
 

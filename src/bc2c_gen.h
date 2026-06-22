@@ -136,6 +136,14 @@ static void generate_function(hl_function*f){
 	  LN("%s f%d(%s) {",ctype(fret),f->findex,as); }
 	tabs++;
 	for(int i=fu->nargs;i<f->nregs;i++){ if(f->regs[i]->kind==HVOID) continue; EX("%s r%d",ctype(f->regs[i]),i); }
+#ifdef DC_GC_ROOTS
+	/* Force every GC-managed pointer register (args + locals) onto the linear-memory
+	   shadow stack by taking its address, so HashLink's conservative GC scan can see
+	   it. Cheaper than Binaryen --spill-pointers (no per-call save/restore explosion). */
+	{ int __np=0; for(int i=0;i<f->nregs;i++) if(f->regs[i]->kind!=HVOID && is_ptr(f->regs[i])) __np++;
+	  if(__np){ EX("void * volatile __gcs = 0; (void)__gcs");
+	    for(int i=0;i<f->nregs;i++) if(f->regs[i]->kind!=HVOID && is_ptr(f->regs[i])) EX("__gcs = (void*)&r%d",i); } }
+#endif
 	int maxtrap=0,cur=0; for(int i=0;i<nops;i++){ if(f->ops[i].op==OTrap){cur++; if(cur>maxtrap)maxtrap=cur;} else if(f->ops[i].op==OEndTrap && f->ops[i].p1) cur--; }
 	for(int i=0;i<maxtrap;i++) EX("hl_trap_ctx trap$%d",i);
 	g_clid=0; for(int i=0;i<nops;i++){ if(f->ops[i].op==OStaticClosure){ int fid=f->ops[i].p2; EX("static vclosure cl$%d = { %s, (void*)%s, 0 }",g_clid,tval(ftype[fid]),fname[fid]); g_clid++; } }

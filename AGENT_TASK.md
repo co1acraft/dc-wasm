@@ -19,16 +19,20 @@
 > 9. **shader GLES-3 rewrite** in `gl_shader_source`: `#version 300 es`, rename
 >    reserved word `sample`, `layout(location=N)` for MRT outputs.
 >
-> **Remaining blocker = the GC.** Disabled → leaks → `Out of Memory (pages)` during
-> asset/audio init (no frame yet). Enabled → the conservative scan can't see
-> wasm-local pointers → collects live objects.
-> - `--spill-pointers` *works* with `-g2` (so Binaryen can find `__stack_pointer`),
->   but ~9×-bloats the module (46 MB → 423 MB) with a single **94 MB function that
->   exceeds V8's 7.65 MB per-function limit** (the giant HL entrypoint). Unusable.
-> - No safe manual-collect point exists (HL runs one deep blocking loop).
-> - **Next task (transpiler-level):** split oversized functions so spill-pointers
->   fits, and/or emit precise rooting in `bc2c` (keep pointer registers on the
->   shadow stack). The original brief below is kept for historical context.
+> **Remaining blocker = the GC** (conservative scan can't see wasm-local pointers).
+> Progress:
+> - `--spill-pointers` works but ~9×-bloats the module (46→423 MB) with a 94 MB
+>   function over V8's 7.65 MB limit. Unusable.
+> - **`bc2c` now emits precise rooting** (`GC_ROOTS=1 scripts/10_build_tools.sh`):
+>   forces GC pointer registers onto the shadow stack once per function — no size
+>   explosion (46→58 MB). Generated code is now GC-correct.
+> - **Remaining gap: libhl/native code.** `-O1` → under-roots (live `hxsl.Shader`
+>   collected → "Can't cast JsonPrinter to Shader"). `-O0` (locals on shadow
+>   stack) fixes that and reaches **"1291 shaders loaded"**, but over-roots
+>   (gc_major frees nothing) → OOM during asset load.
+> - **Next task:** precise rooting for libhl/native (spill only their pointer
+>   locals — needs source-level rooting or a side-module split) + likely
+>   `MEMORY64` for the 4 GB ceiling. The original brief below is historical.
 
 ---
 
