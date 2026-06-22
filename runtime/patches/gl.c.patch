@@ -1,0 +1,89 @@
+--- a/gl.c
++++ b/gl.c
+@@ -27,6 +27,11 @@
+ #	include <GLES3/gl3.h>
+ #	include <GLES3/gl3ext.h>
+ #	define HL_GLES
++#elif defined(__EMSCRIPTEN__)
++#	include <SDL.h>
++#	include <GLES3/gl3.h>
++#	include <GLES2/gl2ext.h>
++#	define HL_GLES
+ #else
+ #	include <SDL2/SDL.h>
+ #	include <GL/glu.h>
+@@ -194,8 +199,14 @@
+ }
+ 
+ HL_PRIM void HL_NAME(gl_bind_frag_data_location)( vdynamic *p, int colNum, vstring *name ) {
++#ifdef __EMSCRIPTEN__
++	/* GLES 3.00 has no glBindFragDataLocation; locations are baked into the shader
++	   via layout(location=) by gl_shader_source. No-op here. */
++	(void)p; (void)colNum; (void)name;
++#else
+ 	char *cname = hl_to_utf8(name->bytes);
+ 	glBindFragDataLocation(p->v.i, colNum, cname);
++#endif
+ }
+ 
+ HL_PRIM void HL_NAME(gl_attach_shader)( vdynamic *p, vdynamic *s ) {
+@@ -250,8 +261,42 @@
+ 	return alloc_i32(s);
+ }
+ 
++#ifdef __EMSCRIPTEN__
++static int gl_ident_ch( char c ){ return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'; }
++#endif
+ HL_PRIM void HL_NAME(gl_shader_source)( vdynamic *s, vstring *src ) {
+ 	const GLchar *c = (GLchar*)hl_to_utf8(src->bytes);
++#ifdef __EMSCRIPTEN__
++	/* Heaps emits desktop GLSL ("#version 150"); WebGL2 needs GLSL ES 3.00. Rewrite
++	   the leading #version line, and rename whole-word identifiers that are reserved
++	   in GLSL ES 3.00 (but not in desktop 150) by suffixing them with "_hx". */
++	{
++		static const char *RESV[] = { "sample", "filter", "input", "output", "active", "common", "partition", 0 };
++		size_t slen = strlen(c);
++		char *buf = (char*)malloc(slen*2 + 64);
++		size_t o = 0; const char *p = c;
++		if( strncmp(p,"#version ",9)==0 ){ const char *nl=strchr(p,'\n'); if(nl){ const char*h="#version 300 es"; memcpy(buf+o,h,strlen(h)); o+=strlen(h); p=nl; } }
++		while( *p ){
++			if( gl_ident_ch(*p) && (p==c || !gl_ident_ch(p[-1])) ){
++				const char *st=p; while( gl_ident_ch(*p) ) p++;
++				size_t wl=(size_t)(p-st); int done=0;
++				for(int i=0;RESV[i];i++){ if(strlen(RESV[i])==wl && strncmp(st,RESV[i],wl)==0){ memcpy(buf+o,st,wl); o+=wl; buf[o++]='_'; buf[o++]='h'; buf[o++]='x'; done=1; break; } }
++				if(!done){
++					/* GLES 3.00 needs explicit locations on multiple frag outputs; Heaps
++					   names them OUTPUTk and binds k-1 sequentially via glBindFragDataLocation. */
++					if(wl==3 && strncmp(st,"out",3)==0){ const char*q=p; while(*q==' '||*q=='\t')q++; while(gl_ident_ch(*q))q++; while(*q==' '||*q=='\t')q++;
++						if(strncmp(q,"OUTPUT",6)==0 && q[6]>='0'&&q[6]<='9'){ int loc=atoi(q+6)-1; if(loc<0)loc=0; o+=sprintf(buf+o,"layout(location=%d) ",loc); } }
++					memcpy(buf+o,st,wl); o+=wl;
++				}
++			} else buf[o++]=*p++;
++		}
++		buf[o]=0;
++		const GLchar *cb = buf;
++		glShaderSource(s->v.i, 1, &cb, NULL);
++		free(buf);
++		return;
++	}
++#endif
+ 	glShaderSource(s->v.i, 1, &c, NULL);
+ }
+ 
+@@ -594,14 +639,14 @@
+ 
+ HL_PRIM double HL_NAME(gl_query_result)( vdynamic *q ) {
+ 	GLuint64 v = -1;
+-#	if !defined(HL_MESA) && !defined(HL_MOBILE)
++#	if !defined(HL_MESA) && !defined(HL_MOBILE) && !defined(__EMSCRIPTEN__)
+ 	glGetQueryObjectui64v(q->v.i, GL_QUERY_RESULT, &v);
+ #	endif
+ 	return (double)v;
+ }
+ 
+ HL_PRIM void HL_NAME(gl_query_counter)( vdynamic *q, int target ) {
+-#	if !defined(HL_MESA) && !defined(HL_MOBILE)
++#	if !defined(HL_MESA) && !defined(HL_MOBILE) && !defined(__EMSCRIPTEN__)
+ 	glQueryCounter(q->v.i, target);
+ #	endif
+ }

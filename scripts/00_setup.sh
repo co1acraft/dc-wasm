@@ -15,14 +15,23 @@ if [ ! -d "$HL/.git" ]; then
 fi
 ( cd "$HL" && git checkout -q "$HL_COMMIT" 2>/dev/null || echo "  (using current checkout)" )
 
-echo "== Apply patches (file.c explicit-offset IO + fd pinning; gc.c disable) =="
-python3 "$REPO/runtime/patch_hashlink.py" "$HL"
+echo "== Patch HashLink (gc.c, file.c, fmt.c) -- see runtime/patches/ =="
+git -C "$HL" checkout -- src/gc.c src/std/file.c libs/fmt/fmt.c 2>/dev/null || true
+for pair in src/gc.c:gc.c src/std/file.c:file.c libs/fmt/fmt.c:fmt.c; do
+  rel="${pair%%:*}"; pat="${pair##*:}"
+  sed -i 's/\r$//' "$HL/$rel"                       # normalize line endings so patches apply
+  patch -s "$HL/$rel" < "$REPO/runtime/patches/$pat.patch"
+done
 
-echo "== SDL2-era sdl.c/gl.c/GLImports.h (tag $SDL_TAG) =="
+echo "== SDL2-era sdl.c/gl.c/GLImports.h (tag $SDL_TAG) + GLES3/web patches =="
 mkdir -p "$SDL112"
 for f in sdl.c gl.c GLImports.h; do
-  [ -f "$SDL112/$f" ] || curl -fsSL -o "$SDL112/$f" \
+  curl -fsSL -o "$SDL112/$f" \
     "https://raw.githubusercontent.com/HaxeFoundation/hashlink/$SDL_TAG/libs/sdl/$f"
+done
+for pat in sdl.c gl.c; do
+  sed -i 's/\r$//' "$SDL112/$pat"
+  patch -s "$SDL112/$pat" < "$REPO/runtime/patches/$pat.patch"
 done
 
 echo "== Build native libhl + hl (for the transpiler/tools and a native sanity run) =="

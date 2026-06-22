@@ -13,11 +13,24 @@ var Module = {
   arguments: [],
   thisProgram: '/data/deadcells',
   ENV: { '_': '/data/deadcells' },         // so the game derives froot=/data
+  preRun: [function(){                      // writable dirs for save files (MEMFS)
+    ['/save','/data','/data/save','/.local','/.local/share'].forEach(function(d){
+      try { FS.mkdir(d); } catch(e){}
+    });
+    rlog('[harness] created save dirs');
+  }],
   print:    function(s){ rlog('[out] '+s); },
   printErr: function(s){ rlog('[err] '+s); },
   onRuntimeInitialized: function(){ rlog('[harness] runtime initialized'); },
   onAbort: function(w){ rlog('[abort] '+w); },
 };
+// progress diagnostics: count animation frames + report canvas/GL state
+var __raf = 0, __origRAF = window.requestAnimationFrame.bind(window);
+window.requestAnimationFrame = function(cb){ __raf++; return __origRAF(cb); };
+setInterval(function(){
+  var c = document.getElementById('canvas');
+  rlog('[diag] rafFrames='+__raf+' canvas='+(c?c.width+'x'+c.height:'?')+' Module.ctx='+(typeof Module!=='undefined'&&!!Module.ctx));
+}, 4000);
 </script>
 <script src="deadcells.js"></script>
 </body>

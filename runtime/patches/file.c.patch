@@ -1,0 +1,175 @@
+--- a/file.c
++++ b/file.c
+@@ -39,6 +39,37 @@
+ #	define HL_UFOPEN
+ #else
+ #include <errno.h>
++#include <sys/stat.h>
++#include <stdlib.h>
++#include <string.h>
++#endif
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++#ifdef DC_BROWSER
++EM_JS(double, js_xhr_size, (int pathPtr), {
++  var p = UTF8ToString(pathPtr);
++  if(p.indexOf('/data/')===0) p=p.substring(6); else if(p.charCodeAt(0)===47) p=p.substring(1);
++  try { var x=new XMLHttpRequest(); x.open('HEAD','files/'+p,false); x.send();
++    if(x.status>=200 && x.status<300){ var l=x.getResponseHeader('Content-Length'); return l?parseFloat(l):-1; }
++    return -1; } catch(e){ return -1; }
++});
++EM_JS(int, js_xhr_read, (int pathPtr, int ptr, int len, double pos), {
++  var p = UTF8ToString(pathPtr);
++  if(p.indexOf('/data/')===0) p=p.substring(6); else if(p.charCodeAt(0)===47) p=p.substring(1);
++  try { var x=new XMLHttpRequest(); x.open('GET','files/'+p,false); x.responseType='arraybuffer';
++    x.setRequestHeader('Range','bytes='+pos+'-'+(pos+len-1)); x.send();
++    if(x.status===206||x.status===200){ var a=new Uint8Array(x.response); var n=Math.min(a.length,len); HEAPU8.set(a.subarray(0,n),ptr); return n; }
++    return -1; } catch(e){ return -1; }
++});
++#else
++EM_JS(int, js_fread, (int emfd, int ptr, int len, double pos), {
++  try { var st=FS.streams[emfd]; if(!st) return -1; var nfd=st.nfd; if(nfd===undefined) return -1;
++    var fs=require('fs'); var nb=Buffer.allocUnsafe(len); var got=0;
++    while(got<len){ var r=fs.readSync(nfd,nb,got,len-got,pos+got); if(r<=0) break; got+=r; }
++    if(got>0) HEAPU8.set(new Uint8Array(nb.buffer,nb.byteOffset,got),ptr); return got;
++  } catch(e){ return -1; }
++});
++#endif
+ #endif
+ 
+ #ifdef HL_WIN_DESKTOP
+@@ -71,11 +102,27 @@
+ struct _hl_fdesc {
+ 	void (*finalize)( hl_fdesc * );
+ 	FILE *f;
++	int64 fpos;
++	int64 fsize;
++	char *url;
++	int seekable;
+ #	ifdef HL_WIN_DESKTOP
+ 	bool is_std;
+ #	endif
+ };
+ 
++#ifdef __EMSCRIPTEN__
++#ifdef DC_BROWSER
++#define HL_PIN_MAX 4096
++static hl_fdesc* hl_pinned[HL_PIN_MAX]; static int hl_pinned_n=0;
++static void hl_pin_fd( hl_fdesc *fd ){ if(hl_pinned_n<HL_PIN_MAX){ hl_pinned[hl_pinned_n]=fd; hl_add_root(&hl_pinned[hl_pinned_n]); hl_pinned_n++; } }
++#else
++#include <pthread.h>
++#define HL_PIN_MAX 4096
++static hl_fdesc* hl_pinned[HL_PIN_MAX]; static int hl_pinned_n=0; static pthread_mutex_t hl_pin_mx=PTHREAD_MUTEX_INITIALIZER;
++static void hl_pin_fd( hl_fdesc *fd ){ pthread_mutex_lock(&hl_pin_mx); if(hl_pinned_n<HL_PIN_MAX){ hl_pinned[hl_pinned_n]=fd; hl_add_root(&hl_pinned[hl_pinned_n]); hl_pinned_n++; } pthread_mutex_unlock(&hl_pin_mx); }
++#endif
++#endif
+ static void fdesc_finalize( hl_fdesc *f ) {
+ 	if( f->f ) fclose(f->f);
+ }
+@@ -89,10 +136,29 @@
+ 	FILE *f = fopen((char*)name,MODES[mode|(binary?4:0)]);
+ #	endif
+ 	hl_fdesc *fd;
++#if defined(__EMSCRIPTEN__) && defined(DC_BROWSER)
++	/* Read-mode opens that miss in MEMFS (f==NULL) are served from the server via
++	   XHR Range (res.pak, assets). Writes and any file present in MEMFS (e.g. saves)
++	   use the normal libc path below so they are read/written in the virtual FS. */
++	if( f == NULL && (mode == 0 || mode == 3) ) {
++	  char u[1024]; int i=0; for(;((char*)name)[i]&&i<1023;i++) u[i]=((char*)name)[i]; u[i]=0;
++	  double zz = js_xhr_size((int)(intptr_t)u);
++	  if( zz >= 0 ){
++	    fd = (hl_fdesc*)hl_gc_alloc_finalizer(sizeof(hl_fdesc));
++	    fd->finalize = fdesc_finalize; fd->f = NULL; fd->fpos=0; fd->fsize=(int64)zz; fd->seekable=1;
++	    fd->url = (char*)malloc(i+1); memcpy(fd->url,u,i+1);
++	    hl_pin_fd(fd); return fd;
++	  }
++	}
++#endif
+ 	if( f == NULL ) return NULL;
+ 	fd = (hl_fdesc*)hl_gc_alloc_finalizer(sizeof(hl_fdesc));
+ 	fd->finalize = fdesc_finalize;
+ 	fd->f = f;
++	fd->fpos = 0; fd->seekable = 0; fd->url = NULL;
++#if defined(__EMSCRIPTEN__) && !defined(DC_BROWSER)
++	fd->seekable = 1; hl_pin_fd(fd);
++#endif
+ 	SET_IS_STD(fd, false);
+ 	return fd;
+ }
+@@ -127,9 +193,12 @@
+ HL_PRIM int hl_file_read( hl_fdesc *f, vbyte *buf, int pos, int len ) {
+ 	int ret;
+ 	if( !f ) return -1;
+-	hl_blocking(true);
++#if defined(__EMSCRIPTEN__) && defined(DC_BROWSER)
++	if( f->seekable ){ ret = js_xhr_read((int)(intptr_t)f->url,(int)(intptr_t)((char*)buf+pos),len,(double)f->fpos); if(ret>0) f->fpos+=ret; return ret; }
++#elif defined(__EMSCRIPTEN__)
++	if( f->seekable ){ ret = js_fread(fileno(f->f),(int)(intptr_t)((char*)buf+pos),len,(double)f->fpos); if(ret>0) f->fpos+=ret; return ret; }
++#endif
+ 	ret = (int)fread((char*)buf+pos,1,len,f->f);
+-	hl_blocking(false);
+ 	return ret;
+ }
+ 
+@@ -145,22 +214,31 @@
+ 
+ HL_PRIM int hl_file_read_char( hl_fdesc *f ) {
+ 	unsigned char cc;
+-	hl_blocking(true);
+-	if( !f || fread(&cc,1,1,f->f) != 1 ) {
+-		hl_blocking(false);
+-		return -2;
+-	}
+-	hl_blocking(false);
++	if( !f ) return -2;
++#if defined(__EMSCRIPTEN__) && defined(DC_BROWSER)
++	if( f->seekable ){ if( js_xhr_read((int)(intptr_t)f->url,(int)(intptr_t)&cc,1,(double)f->fpos)!=1 ) return -2; f->fpos++; return cc; }
++#elif defined(__EMSCRIPTEN__)
++	if( f->seekable ){ if( js_fread(fileno(f->f),(int)(intptr_t)&cc,1,(double)f->fpos)!=1 ) return -2; f->fpos++; return cc; }
++#endif
++	if( fread(&cc,1,1,f->f) != 1 ) return -2;
+ 	return cc;
+ }
+ 
+ HL_PRIM bool hl_file_seek( hl_fdesc *f, int pos, int kind ) {
+ 	if( !f ) return false;
++#if defined(__EMSCRIPTEN__) && defined(DC_BROWSER)
++	if( f->seekable ){ int64 np; if(kind==SEEK_SET)np=pos; else if(kind==SEEK_CUR)np=f->fpos+pos; else np=f->fsize+pos; f->fpos=np; return true; }
++#elif defined(__EMSCRIPTEN__)
++	if( f->seekable ){ struct stat st; int64 np; if(kind==SEEK_SET)np=pos; else if(kind==SEEK_CUR)np=f->fpos+pos; else {if(fstat(fileno(f->f),&st))return false; np=(int64)st.st_size+pos;} f->fpos=np; return true; }
++#endif
+ 	return fseek(f->f,pos,kind) == 0;
+ }
+ 
+ HL_PRIM int hl_file_tell( hl_fdesc *f ) {
+ 	if( !f ) return -1;
++#ifdef __EMSCRIPTEN__
++	if( f->seekable ) return (int)f->fpos;
++#endif
+ 	return (int)ftell(f->f);
+ }
+ 
+@@ -169,7 +247,12 @@
+ #	ifdef HL_WIN
+ 	return _fseeki64(f->f,(__int64)pos,kind) == 0;
+ #	else
+-	return fseek(f->f,(int64)pos,kind) == 0;
++#if defined(__EMSCRIPTEN__) && defined(DC_BROWSER)
++	if( f->seekable ){ int64 np; if(kind==SEEK_SET)np=(int64)pos; else if(kind==SEEK_CUR)np=f->fpos+(int64)pos; else np=f->fsize+(int64)pos; f->fpos=np; return true; }
++#elif defined(__EMSCRIPTEN__)
++	if( f->seekable ){ struct stat st; int64 np; if(kind==SEEK_SET)np=(int64)pos; else if(kind==SEEK_CUR)np=f->fpos+(int64)pos; else {if(fstat(fileno(f->f),&st))return false; np=(int64)st.st_size+(int64)pos;} f->fpos=np; return true; }
++#endif
++	return fseeko(f->f,(off_t)(int64)pos,kind) == 0;
+ #	endif
+ }
+ 
+@@ -178,7 +261,8 @@
+ #	ifdef HL_WIN
+ 	return (double)_ftelli64(f->f);
+ #	else
+-	return (double)ftell(f->f);
++	if( f->seekable ) return (double)f->fpos;
++	return (double)ftello(f->f);
+ #	endif
+ }
+ 

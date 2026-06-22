@@ -29,6 +29,10 @@ ccobj "$REPO/runtime/ssl_impl.c" "$WOBJ/ssl_impl.wo" -I "$HL/src" & wait_slots
 ccobj "$HL/libs/ui/ui_stub.c"    "$WOBJ/ui_stub.wo"  -I "$HL/src" & wait_slots
 ccobj "$SDL112/gl.c"             "$WOBJ/sdlgl.wo"  -sUSE_SDL=2 -sFULL_ES3 $SDLINC & wait_slots
 ccobj "$SDL112/sdl.c"            "$WOBJ/sdlmain.wo" -sUSE_SDL=2 $SDLINC & wait_slots
+# fmt lib (image/zlib/vorbis decoding) against Emscripten codec ports
+PORTS="-sUSE_LIBPNG=1 -sUSE_ZLIB=1 -sUSE_VORBIS=1 -sUSE_OGG=1"
+ccobj "$HL/libs/fmt/fmt.c"       "$WOBJ/fmt.wo" $PORTS -I "$HL/src" -I "$HL/include/minimp3" & wait_slots
+ccobj "$HL/libs/fmt/sha1.c"      "$WOBJ/fmt_sha1.wo" -I "$HL/src" & wait_slots
 
 echo "== compile libhl runtime (gc patched, std minus file, pcre) =="
 ccobj "$HL/src/gc.c" "$WOBJ/gc.wo" -I "$HL/src" -I "$HL/include/pcre" $PCRE_DEFS & wait_slots
@@ -40,10 +44,10 @@ emcc -c $PT -O1 -w -DDC_BROWSER -I "$HL/src" -I "$HL/include/pcre" $PCRE_DEFS "$
 wait
 
 RT_COMMON=$(ls "$WOBJ"/gc.wo "$WOBJ"/std_*.wo "$WOBJ"/pcre2_*.wo)
-GAME=$(ls "$WOBJ"/dc_*.wo "$WOBJ"/ssl_impl.wo "$WOBJ"/ui_stub.wo "$WOBJ"/sdlmain.wo "$WOBJ"/sdlgl.wo)
+GAME=$(ls "$WOBJ"/dc_*.wo "$WOBJ"/ssl_impl.wo "$WOBJ"/ui_stub.wo "$WOBJ"/sdlmain.wo "$WOBJ"/sdlgl.wo "$WOBJ"/fmt.wo "$WOBJ"/fmt_sha1.wo)
 
 echo "== link node build =="
-emcc -O1 -w $PT -sUSE_SDL=2 -sFULL_ES3 -sGL_ENABLE_GET_PROC_ADDRESS \
+emcc -O1 -w $PT -sUSE_SDL=2 -sFULL_ES3 -sGL_ENABLE_GET_PROC_ADDRESS $PORTS \
   $GAME "$WOBJ/file_node.wo" $RT_COMMON \
   -s PTHREAD_POOL_SIZE=40 -s PTHREAD_POOL_SIZE_STRICT=0 \
   -s INITIAL_MEMORY=1610612736 -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=4294967296 \
@@ -53,11 +57,13 @@ emcc -O1 -w $PT -sUSE_SDL=2 -sFULL_ES3 -sGL_ENABLE_GET_PROC_ADDRESS \
 echo "  -> $BUILD/deadcells-node.js"
 
 echo "== link web build =="
-emcc -O1 -w $PT -sUSE_SDL=2 -sFULL_ES3 -sGL_ENABLE_GET_PROC_ADDRESS \
+emcc -O1 -w $PT -sUSE_SDL=2 -sFULL_ES3 -sGL_ENABLE_GET_PROC_ADDRESS $PORTS \
   $GAME "$WOBJ/file_browser.wo" $RT_COMMON \
   -s PROXY_TO_PTHREAD -s PTHREAD_POOL_SIZE=40 -s PTHREAD_POOL_SIZE_STRICT=0 \
+  -s OFFSCREEN_FRAMEBUFFER=1 -s MAX_WEBGL_VERSION=2 \
   -s INITIAL_MEMORY=1610612736 -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=4294967296 \
-  -s EXIT_RUNTIME=0 -s ERROR_ON_UNDEFINED_SYMBOLS=0 -s FORCE_FILESYSTEM=1 -s ASSERTIONS=1 \
+  -s EXIT_RUNTIME=0 -s ERROR_ON_UNDEFINED_SYMBOLS=0 -s FORCE_FILESYSTEM=1 -s ASSERTIONS=0 \
+  -s GL_ASSERTIONS=1 \
   -s INVOKE_RUN=1 \
   -o "$REPO/web/deadcells.js"
 echo "  -> $REPO/web/deadcells.js  (+ .wasm)"

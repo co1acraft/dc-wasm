@@ -113,24 +113,29 @@ console output is mirrored to `web/browser.log`.
 - Generated C compiles cleanly (0 errors) both natively (≈85 MB binary) and to
   wasm (≈46–47 MB module).
 - Full engine boot runs: HashLink runtime init, thread pool, **`res.pak`
-  loads** (2 GB, SHA-256 stamp verified) → prints `done.`, Steam shim returns
-  OK, and execution reaches **SDL / WebGL** initialization.
-- Real SDL2-era `sdl.c`/`gl.c` (HashLink tag `1.12`, matching the game's
-  bytecode) compile and link against Emscripten's SDL2 port + `FULL_ES3`.
+  loads** (2 GB, SHA-256 stamp verified) → prints `done.`, Steam shim returns OK.
+- **Browser build runs the entire engine init** (verified headless Chromium +
+  SwiftShader): creates a **WebGL2 context**, **compiles all 1291 shaders**,
+  **decodes PNG/asset data** (real `fmt` lib), and initializes audio. WebGL draw
+  commands execute (confirmed via GPU `ReadPixels`).
+
+Getting from "crash at GL init" to "whole engine runs" took a series of
+Emscripten/WebGL2 fixes (see `runtime/patches/` and `scripts/40_build_wasm.sh`):
+`OFFSCREEN_FRAMEBUFFER` (SDL2's EGL proxies context creation to the main thread,
+so OffscreenCanvas can't be used); `gl.c` in `HL_GLES` mode; per-subsystem
+`SDL_Init` (HAPTIC unsupported); `PROFILE_ES`; MEMFS save files; GLES-3 shader
+rewriting (`#version 300 es`, reserved-word rename, `layout(location=)` for MRT).
 
 **Known issues / WIP**
-- **GC is currently disabled** as a workaround (it *leaks*). HashLink's
-  conservative GC scans the native stack + `setjmp` `jmp_buf`, but wasm keeps
-  locals in VM-managed locals that `setjmp` doesn't capture, so live objects got
-  collected mid-use (e.g. a file descriptor finalized during a read). Open file
-  descriptors are pinned as GC roots; a proper fix (precise rooting or spilling
-  locals to the linear-memory shadow stack so the scan can see them) is the main
-  remaining task.
+- **The GC is the remaining blocker.** It's disabled (it *leaks* → `Out of
+  Memory` during heavy asset/audio init, before a frame is presented). HashLink's
+  conservative GC can't see pointers held in wasm locals (not on the linear-memory
+  stack), so enabling it collects live objects. The standard fix — Binaryen's
+  `--spill-pointers` — currently **fails on this `-O1` + pthreads build**
+  (`getStackSpace: failed to find the stack pointer`). A working precise/spilling
+  GC is the main open task before the game renders a playable frame.
 - **Rendering is browser-only.** node has no canvas/WebGL, so the node build
-  stops at SDL init (`screen is not defined`) — that's expected. The browser
-  build is the real target.
-- In-browser run hasn't been verified in this environment (no browser
-  available here).
+  stops at SDL init (`screen is not defined`) — expected.
 
 ---
 
@@ -145,8 +150,12 @@ src/
   inspect.c       bytecode inspector (counts funcs/types/opcodes/natives)
   disasm.c        mini disassembler
 runtime/
-  patch_hashlink.py  patches vendored HashLink: file.c (explicit-offset I/O +
-                     XHR path + fd pinning) and gc.c (disable collection)
+  patches/        unified diffs applied to vendored sources by 00_setup.sh:
+                    gc.c  (disable collection; tolerate unregistered threads)
+                    file.c(explicit-offset I/O: NODEFS/XHR reads, MEMFS writes, fd pinning)
+                    fmt.c (build under Emscripten; stub turbojpeg)
+                    sdl.c (per-subsystem SDL_Init; GLES profile for web)
+                    gl.c  (HL_GLES mode; rewrite shaders to GLSL ES 3.00)
   ssl_impl.c         real SHA-256/SHA-1 ssl_dgst_make (res.pak stamp check)
 web/
   deadcells.html  canvas harness + console->server log bridge

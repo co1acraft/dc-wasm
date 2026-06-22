@@ -1,0 +1,40 @@
+--- a/gc.c
++++ b/gc.c
+@@ -169,7 +169,7 @@
+ #define GC_FORCE_MAJOR	8
+ #define GC_PROFILE_MEM  16
+ 
+-static int gc_flags = 0;
++static int gc_flags = 64; /* GC_DISABLE: conservative scan can't see wasm-local pointers; --spill-pointers fails at -O1. Leaks (OOM on long runs) -> main open task. */
+ static gc_pheader *gc_level1_null[1<<GC_LEVEL1_BITS] = {NULL};
+ static gc_pheader **hl_gc_page_map[1<<GC_LEVEL0_BITS] = {NULL};
+ static gc_pheader *gc_free_pheaders = NULL;
+@@ -252,12 +252,18 @@
+ 	bool mt = (gc_flags & GC_NO_THREADS) == 0;
+ 	if( !t && gc_threads.count == 0 ) return;
+ 	if( lock ) {
+-		if( !t )
+-			hl_fatal("Can't lock GC in unregistered thread");
++		if( !t ) {
++			/* Unregistered thread (e.g. an SDL/async-loader pthread not created via
++			   hl_thread_start). GC is disabled, so just take the allocator mutex for
++			   safety and skip the per-thread scan context instead of aborting. */
++			if( mt ) hl_mutex_acquire(gc_threads.global_lock);
++			return;
++		}
+ 		if( mt ) gc_save_context(t,&lock);
+ 		t->gc_blocking++;
+ 		if( mt ) hl_mutex_acquire(gc_threads.global_lock);
+ 	} else {
++		if( !t ) { if( mt ) hl_mutex_release(gc_threads.global_lock); return; }
+ 		t->gc_blocking--;
+ 		if( mt ) hl_mutex_release(gc_threads.global_lock);
+ 	}
+@@ -860,6 +866,7 @@
+ }
+ 
+ static void gc_major() {
++	if( gc_flags & 64 ) return; /* GC_DISABLE */
+ 
+ 	if( gc_flags & GC_PROFILE_MEM ) {
+ 		double gc_mem = gc_stats.mark_bytes;

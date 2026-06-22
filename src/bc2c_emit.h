@@ -187,7 +187,7 @@ static void emit_native_stubs(void){
 	LN("// native stubs (non-std/ui/sdl): log-once + return 0");
 	char **seen=calloc(code->nnatives,sizeof(char*)); int ns=0;
 	for(int i=0;i<code->nnatives;i++){ const char*lib=code->natives[i].lib; const char*l=(lib[0]=='?')?lib+1:lib;
-		if(!strcmp(l,"std")||!strcmp(l,"ui")||!strcmp(l,"sdl")) continue;
+		if(!strcmp(l,"std")||!strcmp(l,"ui")||!strcmp(l,"sdl")||!strcmp(l,"fmt")) continue;
 		const char*cn=native_cname(i); hl_type*t=code->natives[i].t; hl_type_fun*fu=t->fun;
 		if(!strcmp(cn,"ssl_dgst_make")) continue; /* provided by ssl_impl.c (real SHA256) */
 		int dup=0; for(int j=0;j<ns;j++) if(!strcmp(seen[j],cn)){dup=1;break;} if(dup) continue; seen[ns++]=strdup(cn);
