@@ -5,7 +5,7 @@
  #define GC_PROFILE_MEM  16
  
 -static int gc_flags = 0;
-+static int gc_flags = 64; /* GC_DISABLE: conservative scan can't see wasm-local pointers; --spill-pointers fails at -O1. Leaks (OOM on long runs) -> main open task. */
++static int gc_flags = 64; /* GC_DISABLE: conservative scan can't see wasm-local pointers; --spill-pointers fits but explodes giant fns past V8 limits. Leaks -> OOM. See runtime/patches/gc.c.patch + README. */
  static gc_pheader *gc_level1_null[1<<GC_LEVEL1_BITS] = {NULL};
  static gc_pheader **hl_gc_page_map[1<<GC_LEVEL0_BITS] = {NULL};
  static gc_pheader *gc_free_pheaders = NULL;

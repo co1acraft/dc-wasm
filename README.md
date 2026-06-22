@@ -129,11 +129,21 @@ rewriting (`#version 300 es`, reserved-word rename, `layout(location=)` for MRT)
 **Known issues / WIP**
 - **The GC is the remaining blocker.** It's disabled (it *leaks* → `Out of
   Memory` during heavy asset/audio init, before a frame is presented). HashLink's
-  conservative GC can't see pointers held in wasm locals (not on the linear-memory
-  stack), so enabling it collects live objects. The standard fix — Binaryen's
-  `--spill-pointers` — currently **fails on this `-O1` + pthreads build**
-  (`getStackSpace: failed to find the stack pointer`). A working precise/spilling
-  GC is the main open task before the game renders a playable frame.
+  conservative GC can't see pointers held in wasm locals (not on the
+  linear-memory shadow stack), so enabling it collects live objects mid-use.
+  Explored fixes:
+  - Binaryen's **`--spill-pointers`** (the standard fix) *does* work if the link
+    keeps the name section (`-g2`, so the pass can find `__stack_pointer`) — but
+    it bloats this module ~9× (46 MB → **423 MB**) and produces a single **94 MB
+    function that exceeds V8's 7.65 MB per-function limit** (HashLink's giant
+    entrypoint). Unusable as-is.
+  - A manual "collect at a safe point" scheme isn't viable: HashLink runs one
+    deep blocking main loop, so there's no shallow-stack moment where a
+    conservative collection is safe.
+  - **Real fix (transpiler-level, the main open task):** split the oversized
+    functions so `--spill-pointers` fits per function, and/or have `bc2c` emit
+    precise rooting (force GC-managed pointer registers onto the shadow stack so
+    the conservative scan finds them).
 - **Rendering is browser-only.** node has no canvas/WebGL, so the node build
   stops at SDL init (`screen is not defined`) — expected.
 

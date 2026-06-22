@@ -20,11 +20,15 @@
 >    reserved word `sample`, `layout(location=N)` for MRT outputs.
 >
 > **Remaining blocker = the GC.** Disabled → leaks → `Out of Memory (pages)` during
-> asset/audio init (no frame yet). Enabled → conservative scan can't see wasm-local
-> pointers → collects live objects. Binaryen `--spill-pointers` (the standard fix)
-> currently fails on this `-O1`+pthreads build (`getStackSpace: failed to find the
-> stack pointer`). A working precise/spilling GC is the next task. The original
-> brief below is kept for historical context.
+> asset/audio init (no frame yet). Enabled → the conservative scan can't see
+> wasm-local pointers → collects live objects.
+> - `--spill-pointers` *works* with `-g2` (so Binaryen can find `__stack_pointer`),
+>   but ~9×-bloats the module (46 MB → 423 MB) with a single **94 MB function that
+>   exceeds V8's 7.65 MB per-function limit** (the giant HL entrypoint). Unusable.
+> - No safe manual-collect point exists (HL runs one deep blocking loop).
+> - **Next task (transpiler-level):** split oversized functions so spill-pointers
+>   fits, and/or emit precise rooting in `bc2c` (keep pointer registers on the
+>   shadow stack). The original brief below is kept for historical context.
 
 ---
 
