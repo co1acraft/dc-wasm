@@ -114,41 +114,35 @@ console output is mirrored to `web/browser.log`.
   wasm (≈46–47 MB module).
 - Full engine boot runs: HashLink runtime init, thread pool, **`res.pak`
   loads** (2 GB, SHA-256 stamp verified) → prints `done.`, Steam shim returns OK.
-- **Browser build runs the entire engine init** (verified headless Chromium +
-  SwiftShader): creates a **WebGL2 context**, **compiles all 1291 shaders**,
-  **decodes PNG/asset data** (real `fmt` lib), and initializes audio. WebGL draw
-  commands execute (confirmed via GPU `ReadPixels`).
+- **Browser build runs the entire engine + reaches the render loop** (verified
+  headless Chromium + SwiftShader): WebGL2 context, **all 1291 shaders compiled**,
+  PNG/assets decoded (real `fmt` lib), render targets created at the right size,
+  and the game issues `glDrawElements` calls each frame.
+- **The GC works.** HashLink's conservative GC can't see pointers held in wasm
+  locals; the fix is two-part: `bc2c` (with `GC_ROOTS=1`, default) forces
+  GC-managed pointer *registers* onto the linear-memory shadow stack once per
+  function (precise — unlike Binaryen `--spill-pointers`, which 9×-bloats the
+  module and produces a 94 MB function over V8's limit), and the libhl/native
+  objects are compiled `-O0` so their pointer locals also live on the shadow
+  stack. Memory is now **bounded (~230 MB, no OOM, no leak)**.
 
-Getting from "crash at GL init" to "whole engine runs" took a series of
-Emscripten/WebGL2 fixes (see `runtime/patches/` and `scripts/40_build_wasm.sh`):
-`OFFSCREEN_FRAMEBUFFER` (SDL2's EGL proxies context creation to the main thread,
-so OffscreenCanvas can't be used); `gl.c` in `HL_GLES` mode; per-subsystem
-`SDL_Init` (HAPTIC unsupported); `PROFILE_ES`; MEMFS save files; GLES-3 shader
-rewriting (`#version 300 es`, reserved-word rename, `layout(location=)` for MRT).
+Getting here took a long series of Emscripten/WebGL2 fixes (see `runtime/patches/`
++ `scripts/40_build_wasm.sh`): `OFFSCREEN_FRAMEBUFFER`; `gl.c` in `HL_GLES` mode;
+per-subsystem `SDL_Init` (HAPTIC unsupported); `PROFILE_ES`; MEMFS save files;
+GLES-3 shader rewriting; the GC rooting above; stubbing OGG decode (OpenAL is
+stubbed, so its decode buffers leaked); and reading the canvas size via
+`emscripten_get_canvas_element_size` (SDL's window size races to 0 under threads).
 
 **Known issues / WIP**
-- **The GC is the remaining blocker** (HashLink's conservative GC can't see
-  pointers held in wasm locals, which aren't on the linear-memory shadow stack).
-  Status of the fixes explored:
-  - Binaryen's **`--spill-pointers`** *works* (with `-g2` so it finds
-    `__stack_pointer`) but bloats the module ~9× (46 MB → **423 MB**) with a
-    single **94 MB function over V8's 7.65 MB limit** (the giant entrypoint).
-    Unusable.
-  - **`bc2c` now emits precise rooting** (build with `GC_ROOTS=1`): it forces
-    GC-managed pointer registers onto the shadow stack at function entry — same
-    effect as spill-pointers but once per function, so **no size explosion**
-    (46 MB → 58 MB). This makes the **generated code** GC-correct.
-  - The remaining gap is the **libhl runtime + native** code (maps, arrays, fmt,
-    SDL…), whose pointers also sit in wasm locals. Compiling them `-O1` →
-    under-rooting (a live `hxsl.Shader` gets collected → "Can't cast … to Shader").
-    Compiling them `-O0` (locals land on the shadow stack) fixes that and the
-    game runs **through "1291 shaders loaded"**, but `-O0` puts so many
-    pointer-looking values on the stack that the conservative scan falsely roots
-    *everything* (`gc_major` frees nothing) → OOM during asset load.
-  - **Real fix:** precise rooting for libhl/native too (spill-pointers only the
-    pointer locals — but it can't be applied to libhl-only within one module, so
-    this needs source-level rooting or a side-module split), and likely
-    `MEMORY64` to clear the 4 GB wasm32 ceiling for DC's asset load.
+- **Nothing renders yet — `glDrawElements` fails GL validation.** DC's `GlDriver`
+  detects **desktop GL** (not GLES) and uses desktop rendering semantics — no
+  VAOs, a cached/global element-buffer binding, likely client-side index arrays.
+  WebGL2 (GLES core) is stricter, so draws fail (`GL_INVALID_OPERATION:
+  glDrawElements: Insufficient buffer size` — no element buffer bound at draw) and
+  the canvas stays blank. The fix is to make DC take the **GLES render path**
+  (its desktop-GL detection fails because Emscripten's `glGetString(GL_VERSION)`
+  is `"OpenGL ES 3.0 (WebGL…)"`, which DC's parser doesn't read as a version), or
+  to emulate the desktop-GL draw state in `gl.c`. This is the main open task.
 - **Rendering is browser-only.** node has no canvas/WebGL, so the node build
   stops at SDL init (`screen is not defined`) — expected.
 

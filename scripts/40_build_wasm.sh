@@ -19,28 +19,31 @@ ccobj(){ # ccobj <src> <out> <extra flags...>
   [ -f "$out" ] && [ "$out" -nt "$src" ] && return 0
   emcc -c $PT -O1 -w "$@" "$src" -o "$out"
 }
+# -O0 variant for libhl runtime + native objects: LLVM keeps C locals in addressable
+# memory (shadow stack) so HashLink's conservative GC can scan their pointers.
+ccobj0(){ local src="$1" out="$2"; shift 2; [ -f "$out" ] && [ "$out" -nt "$src" ] && return 0; emcc -c $PT -O0 -w "$@" "$src" -o "$out"; }
 wait_slots(){ while [ "$(jobs -r | wc -l)" -ge "$J" ]; do wait -n; done; }
 
 echo "== compile game chunks + units (-O1; slow) =="
 for c in "$DC"/dc_f*.c "$DC"/dc_types.c "$DC"/dc_main.c "$DC"/dc_stubs.c; do
   ccobj "$c" "$WOBJ/$(basename "$c").wo" $INC & wait_slots
 done
-ccobj "$REPO/runtime/ssl_impl.c" "$WOBJ/ssl_impl.wo" -I "$HL/src" & wait_slots
-ccobj "$HL/libs/ui/ui_stub.c"    "$WOBJ/ui_stub.wo"  -I "$HL/src" & wait_slots
-ccobj "$SDL112/gl.c"             "$WOBJ/sdlgl.wo"  -sUSE_SDL=2 -sFULL_ES3 $SDLINC & wait_slots
-ccobj "$SDL112/sdl.c"            "$WOBJ/sdlmain.wo" -sUSE_SDL=2 $SDLINC & wait_slots
+ccobj0 "$REPO/runtime/ssl_impl.c" "$WOBJ/ssl_impl.wo" -I "$HL/src" & wait_slots
+ccobj0 "$HL/libs/ui/ui_stub.c"    "$WOBJ/ui_stub.wo"  -I "$HL/src" & wait_slots
+ccobj0 "$SDL112/gl.c"             "$WOBJ/sdlgl.wo"  -sUSE_SDL=2 -sFULL_ES3 $SDLINC & wait_slots
+ccobj0 "$SDL112/sdl.c"            "$WOBJ/sdlmain.wo" -sUSE_SDL=2 $SDLINC & wait_slots
 # fmt lib (image/zlib/vorbis decoding) against Emscripten codec ports
 PORTS="-sUSE_LIBPNG=1 -sUSE_ZLIB=1 -sUSE_VORBIS=1 -sUSE_OGG=1"
-ccobj "$HL/libs/fmt/fmt.c"       "$WOBJ/fmt.wo" $PORTS -I "$HL/src" -I "$HL/include/minimp3" & wait_slots
-ccobj "$HL/libs/fmt/sha1.c"      "$WOBJ/fmt_sha1.wo" -I "$HL/src" & wait_slots
+ccobj0 "$HL/libs/fmt/fmt.c"       "$WOBJ/fmt.wo" $PORTS -I "$HL/src" -I "$HL/include/minimp3" & wait_slots
+ccobj0 "$HL/libs/fmt/sha1.c"      "$WOBJ/fmt_sha1.wo" -I "$HL/src" & wait_slots
 
 echo "== compile libhl runtime (gc patched, std minus file, pcre) =="
-ccobj "$HL/src/gc.c" "$WOBJ/gc.wo" -I "$HL/src" -I "$HL/include/pcre" $PCRE_DEFS & wait_slots
-for s in $STD; do [ "$s" = file ] && continue; ccobj "$HL/src/std/$s.c" "$WOBJ/std_$s.wo" -I "$HL/src" -I "$HL/include/pcre" $PCRE_DEFS & wait_slots; done
-for p in $(pcre_srcs); do ccobj "$p" "$WOBJ/$(basename "$p").wo" -I "$HL/src" -I "$HL/include/pcre" $PCRE_DEFS & wait_slots; done
+ccobj0 "$HL/src/gc.c" "$WOBJ/gc.wo" -I "$HL/src" -I "$HL/include/pcre" $PCRE_DEFS & wait_slots
+for s in $STD; do [ "$s" = file ] && continue; ccobj0 "$HL/src/std/$s.c" "$WOBJ/std_$s.wo" -I "$HL/src" -I "$HL/include/pcre" $PCRE_DEFS & wait_slots; done
+for p in $(pcre_srcs); do ccobj0 "$p" "$WOBJ/$(basename "$p").wo" -I "$HL/src" -I "$HL/include/pcre" $PCRE_DEFS & wait_slots; done
 # file.c: two variants (node = NODEFS, browser = XHR)
-emcc -c $PT -O1 -w           -I "$HL/src" -I "$HL/include/pcre" $PCRE_DEFS "$HL/src/std/file.c" -o "$WOBJ/file_node.wo"
-emcc -c $PT -O1 -w -DDC_BROWSER -I "$HL/src" -I "$HL/include/pcre" $PCRE_DEFS "$HL/src/std/file.c" -o "$WOBJ/file_browser.wo"
+emcc -c $PT -O0 -w           -I "$HL/src" -I "$HL/include/pcre" $PCRE_DEFS "$HL/src/std/file.c" -o "$WOBJ/file_node.wo"
+emcc -c $PT -O0 -w -DDC_BROWSER -I "$HL/src" -I "$HL/include/pcre" $PCRE_DEFS "$HL/src/std/file.c" -o "$WOBJ/file_browser.wo"
 wait
 
 RT_COMMON=$(ls "$WOBJ"/gc.wo "$WOBJ"/std_*.wo "$WOBJ"/pcre2_*.wo)

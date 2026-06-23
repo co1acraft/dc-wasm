@@ -2,7 +2,7 @@
 <html>
 <head><meta charset="utf-8"><title>Dead Cells (WASM)</title></head>
 <body style="margin:0;background:#111">
-<canvas id="canvas" width="1280" height="720" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+<canvas id="canvas" width="1280" height="720" style="width:1280px;height:720px;display:block" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
 <script>
 // Console -> server (so headless runs can capture output) AND devtools.
 function rlog(s){ try{ fetch('/log',{method:'POST',body:String(s)}); }catch(e){} try{ console.log(s); }catch(e){} }

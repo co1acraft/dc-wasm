@@ -1,6 +1,16 @@
 --- a/sdl.c
 +++ b/sdl.c
-@@ -97,17 +97,25 @@
+@@ -1,6 +1,9 @@
+ #define HL_NAME(n) sdl_##n
+ 
+ #include <hl.h>
++#ifdef __EMSCRIPTEN__
++#include <emscripten/html5.h>
++#endif
+ #include <locale.h>
+ 
+ #if defined(_WIN32) || defined(__ANDROID__) || defined(HL_IOS) || defined(HL_TVOS)
+@@ -97,17 +100,25 @@
  
  HL_PRIM bool HL_NAME(init_once)() {
  	SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
@@ -27,3 +37,21 @@
  	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
  	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
  	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+@@ -564,7 +575,17 @@
+ }
+ 
+ HL_PRIM void HL_NAME(win_get_size)(SDL_Window *win, int *width, int *height) {
++#ifdef __EMSCRIPTEN__
++	/* SDL_GetWindowSize races with the canvas-resize handler under PROXY_TO_PTHREAD
++	   and can return a zeroed dimension -> 0-size render targets. Read the stable
++	   canvas drawing-buffer size instead, and never report zero. */
++	int cw=0, ch=0; emscripten_get_canvas_element_size("#canvas", &cw, &ch);
++	int sw=0, sh=0; SDL_GetWindowSize(win, &sw, &sh);
++	*width  = cw>0 ? cw : (sw>0 ? sw : 1280);
++	*height = ch>0 ? ch : (sh>0 ? sh : 720);
++#else
+ 	SDL_GetWindowSize(win, width, height);
++#endif
+ }
+ 
+ HL_PRIM void HL_NAME(win_get_min_size)(SDL_Window *win, int *width, int *height) {

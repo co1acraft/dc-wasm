@@ -5,7 +5,7 @@
  #define GC_PROFILE_MEM  16
  
 -static int gc_flags = 0;
-+static int gc_flags = 64; /* GC_DISABLE: conservative scan can't see wasm-local pointers; --spill-pointers fits but explodes giant fns past V8 limits. Leaks -> OOM. See runtime/patches/gc.c.patch + README. */
++static int gc_flags = 0; /* GC active: bc2c emits shadow-stack rooting (DC_GC_ROOTS) */
  static gc_pheader *gc_level1_null[1<<GC_LEVEL1_BITS] = {NULL};
  static gc_pheader **hl_gc_page_map[1<<GC_LEVEL0_BITS] = {NULL};
  static gc_pheader *gc_free_pheaders = NULL;
@@ -30,11 +30,13 @@
  		t->gc_blocking--;
  		if( mt ) hl_mutex_release(gc_threads.global_lock);
  	}
-@@ -860,6 +866,7 @@
+@@ -913,6 +919,9 @@
+ 		last_profile.alloc_time = gc_stats.alloc_time;
+ 		last_profile.total_allocated = gc_stats.total_allocated;
+ 	}
++#ifdef DC_GC_LOG
++	{ static int _gn=0; long long heap=(long long)__builtin_wasm_memory_size(0)*65536; fprintf(stderr,"[gc#%d] gc_committed=%dMB wasm_heap=%lldMB cum_alloc=%lldMB\n",_gn++,(int)(gc_stats.pages_total_memory>>20),heap>>20,(long long)(gc_stats.total_allocated>>20)); fflush(stderr); }
++#endif
  }
  
- static void gc_major() {
-+	if( gc_flags & 64 ) return; /* GC_DISABLE */
- 
- 	if( gc_flags & GC_PROFILE_MEM ) {
- 		double gc_mem = gc_stats.mark_bytes;
+ HL_API void hl_gc_major() {

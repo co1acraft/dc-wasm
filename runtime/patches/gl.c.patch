@@ -70,7 +70,21 @@
  	glShaderSource(s->v.i, 1, &c, NULL);
  }
  
-@@ -594,14 +639,14 @@
+@@ -461,6 +506,13 @@
+ }
+ 
+ HL_PRIM void HL_NAME(gl_bind_buffer)( int target, vdynamic *b ) {
++#ifdef __EMSCRIPTEN__
++	/* DC skips re-binding the index buffer when it matches curIndexBuffer (a desktop-GL
++	   optimization), but some upload paths unbind ELEMENT_ARRAY_BUFFER (id 0) without
++	   updating that tracker -> no element buffer bound at draw on WebGL2. Keep the last
++	   element buffer bound by ignoring explicit unbinds. */
++	if( target == 0x8893 && ZIDX(b) == 0 ) return;
++#endif
+ 	glBindBuffer(target, ZIDX(b));
+ }
+ 
+@@ -594,14 +646,14 @@
  
  HL_PRIM double HL_NAME(gl_query_result)( vdynamic *q ) {
  	GLuint64 v = -1;

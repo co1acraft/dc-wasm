@@ -19,20 +19,25 @@
 > 9. **shader GLES-3 rewrite** in `gl_shader_source`: `#version 300 es`, rename
 >    reserved word `sample`, `layout(location=N)` for MRT outputs.
 >
-> **Remaining blocker = the GC** (conservative scan can't see wasm-local pointers).
-> Progress:
-> - `--spill-pointers` works but ~9×-bloats the module (46→423 MB) with a 94 MB
->   function over V8's 7.65 MB limit. Unusable.
-> - **`bc2c` now emits precise rooting** (`GC_ROOTS=1 scripts/10_build_tools.sh`):
->   forces GC pointer registers onto the shadow stack once per function — no size
->   explosion (46→58 MB). Generated code is now GC-correct.
-> - **Remaining gap: libhl/native code.** `-O1` → under-roots (live `hxsl.Shader`
->   collected → "Can't cast JsonPrinter to Shader"). `-O0` (locals on shadow
->   stack) fixes that and reaches **"1291 shaders loaded"**, but over-roots
->   (gc_major frees nothing) → OOM during asset load.
-> - **Next task:** precise rooting for libhl/native (spill only their pointer
->   locals — needs source-level rooting or a side-module split) + likely
->   `MEMORY64` for the 4 GB ceiling. The original brief below is historical.
+> **The GC now works** and the game reaches the **render loop**. Fix:
+> - `bc2c` (`GC_ROOTS=1`, default) forces GC pointer registers onto the shadow
+>   stack once per function (precise; `--spill-pointers` was unusable — 423 MB,
+>   94 MB function over V8's limit).
+> - libhl/native objects compiled `-O0` so their pointer locals are on the shadow
+>   stack too. `-O1` under-roots (collects a live Shader); `-O0` is precise enough
+>   here because the GC only over-retained via the OGG/vorbis decode leak, which is
+>   now stubbed (OpenAL is stubbed, so its buffers never drained). Memory is
+>   bounded (~230 MB, no OOM).
+> - Plus: `win_get_size` via `emscripten_get_canvas_element_size` (SDL races to 0
+>   under threads → 0-size render targets), and keep ELEMENT buffer bound.
+>
+> **Remaining blocker = nothing renders (blank).** `glDrawElements` fails GL
+> validation (`Insufficient buffer size`): DC's GlDriver runs in **desktop-GL**
+> mode (no VAOs, cached/global element binding, likely client-side index arrays),
+> which WebGL2 (GLES core) rejects. DC's GLES detection fails because Emscripten's
+> `glGetString(GL_VERSION)` = `"OpenGL ES 3.0 (WebGL…)"` (DC's parser wants a
+> leading number). **Next task:** make DC take the GLES render path, or emulate
+> desktop-GL draw state in `gl.c`. The original brief below is historical.
 
 ---
 
