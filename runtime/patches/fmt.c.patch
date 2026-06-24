@@ -18,17 +18,3 @@
  #else
  	hl_blocking(true);
  	tjhandle h = tjInitDecompress();
-@@ -375,6 +379,13 @@
- };
- 
- HL_PRIM fmt_ogg *HL_NAME(ogg_open)( char *bytes, int size ) {
-+#ifdef __EMSCRIPTEN__
-+	/* Audio decode is disabled on the web build: OpenAL is stubbed, so the normal
-+	   "queue buffer -> play -> free" flow never drains, and DC keeps opening vorbis
-+	   decoders whose system-malloc state leaks (the GC can't see external memory) ->
-+	   multi-GB OOM. Returning NULL makes DC skip sound loads. */
-+	return NULL;
-+#endif
- 	fmt_ogg *o = (fmt_ogg*)hl_gc_alloc_finalizer(sizeof(fmt_ogg));
- 	o->finalize = NULL;
- 	o->bytes = bytes;

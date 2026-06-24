@@ -15,9 +15,9 @@ if [ ! -d "$HL/.git" ]; then
 fi
 ( cd "$HL" && git checkout -q "$HL_COMMIT" 2>/dev/null || echo "  (using current checkout)" )
 
-echo "== Patch HashLink (gc.c, file.c, fmt.c) -- see runtime/patches/ =="
-git -C "$HL" checkout -- src/gc.c src/std/file.c libs/fmt/fmt.c 2>/dev/null || true
-for pair in src/gc.c:gc.c src/std/file.c:file.c libs/fmt/fmt.c:fmt.c; do
+echo "== Patch HashLink (gc.c, file.c, fmt.c, openal.c) -- see runtime/patches/ =="
+git -C "$HL" checkout -- src/gc.c src/std/file.c libs/fmt/fmt.c libs/openal/openal.c 2>/dev/null || true
+for pair in src/gc.c:gc.c src/std/file.c:file.c libs/fmt/fmt.c:fmt.c libs/openal/openal.c:openal.c; do
   rel="${pair%%:*}"; pat="${pair##*:}"
   sed -i 's/\r$//' "$HL/$rel"                       # normalize line endings so patches apply
   patch -s "$HL/$rel" < "$REPO/runtime/patches/$pat.patch"

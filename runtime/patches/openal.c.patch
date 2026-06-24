@@ -1,0 +1,22 @@
+--- a/openal.c
++++ b/openal.c
+@@ -13,8 +13,19 @@
+ #else
+ 	#include <AL/al.h>
+ 	#include <AL/alc.h>
++#ifndef __EMSCRIPTEN__
+ 	#include <AL/alext.h>
+ #endif
++#endif
++
++#ifdef __EMSCRIPTEN__
++/* Emscripten's OpenAL (libopenal.js -> Web Audio) implements core AL/ALC 1.1 only:
++   no <AL/alext.h>, no LP*SOFT typedefs, no al(c)GetProcAddress, no ALC_EXT_EFX.
++   Skipping alext.h leaves ALCImports.h / ALImports.h (all #ifdef SOFT/EFX blocks)
++   empty, so the extension-loader bodies compile to no-ops and the core wrappers
++   bind directly to the JS OpenAL. EFX (effects/filters/aux slots) stays compiled
++   out and is provided as no-op stubs by the transpiler. */
++#endif
+ 
+ // ----------------------------------------------------------------------------
+ // ALC

@@ -181,6 +181,7 @@ static void emit_header(void){
 
 /* ---------- native stubs ----------
    'std' come from libhl; 'ui' from the official ui_stub.c; 'sdl' from sdl.c+gl.c;
+   'fmt' from fmt.c; core 'openal' from openal.c (-lopenal -> Web Audio, EFX excepted);
    ssl_dgst_make from ssl_impl.c. Everything else = logging no-op. steam_init is
    faked to return true so the Steam gate doesn't quit the game (DRM stub). */
 static void emit_native_stubs(void){
@@ -190,6 +191,10 @@ static void emit_native_stubs(void){
 		if(!strcmp(l,"std")||!strcmp(l,"ui")||!strcmp(l,"sdl")||!strcmp(l,"fmt")) continue;
 		const char*cn=native_cname(i); hl_type*t=code->natives[i].t; hl_type_fun*fu=t->fun;
 		if(!strcmp(cn,"ssl_dgst_make")) continue; /* provided by ssl_impl.c (real SHA256) */
+		/* openal: the core AL/ALC natives come from openal.c (linked with -lopenal ->
+		   Emscripten Web Audio). Emscripten has no EFX, so keep only the effect/filter/
+		   auxiliary-effect-slot natives as log-once no-op stubs. */
+		if(!strcmp(l,"openal") && !strstr(cn,"effect") && !strstr(cn,"filter") && !strstr(cn,"auxiliary")) continue;
 		int dup=0; for(int j=0;j<ns;j++) if(!strcmp(seen[j],cn)){dup=1;break;} if(dup) continue; seen[ns++]=strdup(cn);
 		char ps[BS]; int p=0; ps[0]=0;
 		if(fu->nargs==0) snprintf(ps,BS,"void"); else for(int k=0;k<fu->nargs;k++){ char*c=ctype(fu->args[k]); p+=snprintf(ps+p,BS-p,"%s%s p%d",k?",":"",c,k); }

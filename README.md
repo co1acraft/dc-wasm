@@ -121,6 +121,11 @@ support JSPI yet, so it won't run there. Console output is mirrored to
   context, all shaders compiled, `res.pak` streamed via async fetch, assets decoded
   (real `fmt` lib), and the game draws its intro (the Evil Empire splash) — full
   1280×720 frames, animating, **zero GL errors**.
+- **Audio works.** HashLink's `openal` binding is compiled against Emscripten's
+  OpenAL (`-lopenal` → Web Audio), and OGG/Vorbis decode is enabled (real libvorbis
+  port). Verified: the game opens a **running** `AudioContext` and decodes its OGG
+  audio with no errors. (EFX effects/filters are absent in Emscripten's OpenAL and
+  stay stubbed; core positional audio is real.)
 - **The GC works.** HashLink's conservative GC can't see pointers held in wasm
   locals; the fix is two-part: `bc2c` (with `GC_ROOTS=1`, default) forces
   GC-managed pointer *registers* onto the linear-memory shadow stack once per
@@ -157,13 +162,26 @@ The fix is to render on the **main thread**, where the context lives:
 Getting here also took a series of Emscripten/WebGL2 fixes (see `runtime/patches/`
 + `scripts/40_build_wasm.sh`): `gl.c` in `HL_GLES` mode + GLES-3 shader rewriting;
 per-subsystem `SDL_Init` (HAPTIC unsupported); `PROFILE_ES`; MEMFS save files; the
-GC rooting above; stubbing OGG decode (OpenAL is stubbed, so its decode buffers
-leaked); reading the canvas size via `emscripten_get_canvas_element_size`; and a
-`preserveDrawingBuffer` override in the harness so screenshots capture the frame.
+GC rooting above; reading the canvas size via `emscripten_get_canvas_element_size`;
+and a `preserveDrawingBuffer` override in the harness so screenshots capture the
+frame.
+
+### Audio
+
+HashLink's `openal` library (`openal_*` natives) is compiled (`openal.c`, patched
+to skip `<AL/alext.h>` so it builds against Emscripten's core-only OpenAL) and
+linked with `-lopenal`, which Emscripten maps to a **Web Audio** backend. OGG
+decode (`fmt.c`'s `ogg_open`) is re-enabled against the already-linked
+`-sUSE_VORBIS=1 -sUSE_OGG=1` ports. The old multi-GB OOM from leaked Vorbis
+decoders is gone now that OpenAL actually drains queued buffers. Emscripten's
+OpenAL has **no EFX** (effects/filters/aux-effect-slots) and no `al(c)GetProcAddress`,
+so the 33 EFX natives remain no-op stubs (the game gates them behind
+`alcIsExtensionPresent("ALC_EXT_EFX")`, which returns false on the web).
 
 **Known issues / WIP**
-- **Audio is stubbed** (OpenAL), and OGG decode is a no-op (`Failed to decode OGG
-  data` is expected).
+- **Audio needs a user gesture.** Browsers start an `AudioContext` suspended until
+  the first click/keypress (autoplay policy); click the page to enable sound. (The
+  headless test forces `--autoplay-policy=no-user-gesture-required`.)
 - **No frame pacing / input wiring audited** beyond boot + intro rendering;
   gameplay past the splash/menu is not yet verified.
 - **Rendering is browser-only.** node has no canvas/WebGL, so the node build
@@ -185,9 +203,10 @@ runtime/
   patches/        unified diffs applied to vendored sources by 00_setup.sh:
                     gc.c  (disable collection; tolerate unregistered threads)
                     file.c(explicit-offset I/O: async-fetch reads (web) / NODEFS readSync (node), MEMFS writes, fd pinning)
-                    fmt.c (build under Emscripten; stub turbojpeg)
+                    fmt.c (build under Emscripten; stub turbojpeg; OGG/Vorbis decode enabled)
                     sdl.c (per-subsystem SDL_Init; GLES profile; main-thread render yield for JSPI)
                     gl.c  (HL_GLES mode; rewrite shaders to GLSL ES 3.00)
+                    openal.c (skip <AL/alext.h> so it builds against Emscripten core OpenAL -> Web Audio)
   ssl_impl.c         real SHA-256/SHA-1 ssl_dgst_make (res.pak stamp check)
 web/
   deadcells.html  canvas harness + console->server log bridge

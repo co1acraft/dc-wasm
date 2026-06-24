@@ -44,6 +44,10 @@ ccobj0 "$SDL112/sdl.c"            "$WOBJ/sdlmain_browser.wo" -DDC_BROWSER -sUSE_
 PORTS="-sUSE_LIBPNG=1 -sUSE_ZLIB=1 -sUSE_VORBIS=1 -sUSE_OGG=1"
 ccobj0 "$HL/libs/fmt/fmt.c"       "$WOBJ/fmt.wo" $PORTS -I "$HL/src" -I "$HL/include/minimp3" & wait_slots
 ccobj0 "$HL/libs/fmt/sha1.c"      "$WOBJ/fmt_sha1.wo" -I "$HL/src" & wait_slots
+# OpenAL bindings -> Emscripten's libopenal.js (Web Audio). AL headers come from the
+# Emscripten sysroot; -lopenal at link time provides the implementation. EFX is absent
+# in Emscripten so those natives stay stubbed (see bc2c_emit.h openal handling).
+ccobj0 "$HL/libs/openal/openal.c" "$WOBJ/openal.wo" -I "$HL/src" & wait_slots
 
 echo "== compile libhl runtime (gc patched, std minus file, pcre) =="
 ccobj0 "$HL/src/gc.c" "$WOBJ/gc.wo" -I "$HL/src" -I "$HL/include/pcre" $PCRE_DEFS & wait_slots
@@ -56,14 +60,14 @@ wait
 
 RT_COMMON=$(ls "$WOBJ"/gc.wo "$WOBJ"/std_*.wo "$WOBJ"/pcre2_*.wo)
 # GAME excludes the SDL main object; each link adds its own (node vs browser-yield).
-GAME=$(ls "$WOBJ"/dc_*.wo "$WOBJ"/ssl_impl.wo "$WOBJ"/ui_stub.wo "$WOBJ"/sdlgl.wo "$WOBJ"/fmt.wo "$WOBJ"/fmt_sha1.wo)
+GAME=$(ls "$WOBJ"/dc_*.wo "$WOBJ"/ssl_impl.wo "$WOBJ"/ui_stub.wo "$WOBJ"/sdlgl.wo "$WOBJ"/fmt.wo "$WOBJ"/fmt_sha1.wo "$WOBJ"/openal.wo)
 
 echo "== link node build =="
 emcc -O1 -w $PT $SJLJ -sUSE_SDL=2 -sFULL_ES3 -sGL_ENABLE_GET_PROC_ADDRESS $PORTS \
   $GAME "$WOBJ/sdlmain.wo" "$WOBJ/file_node.wo" $RT_COMMON \
   -s PTHREAD_POOL_SIZE=40 -s PTHREAD_POOL_SIZE_STRICT=0 \
   -s INITIAL_MEMORY=1610612736 -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=4294967296 \
-  -s EXIT_RUNTIME=0 -s ERROR_ON_UNDEFINED_SYMBOLS=0 -s FORCE_FILESYSTEM=1 -lnodefs.js \
+  -s EXIT_RUNTIME=0 -s ERROR_ON_UNDEFINED_SYMBOLS=0 -s FORCE_FILESYSTEM=1 -lnodefs.js -lopenal \
   -s MODULARIZE=1 -s EXPORT_NAME=createDC -s INVOKE_RUN=0 -s "EXPORTED_RUNTIME_METHODS=callMain,FS,NODEFS" \
   -o "$BUILD/deadcells-node.js"
 echo "  -> $BUILD/deadcells-node.js"
@@ -80,6 +84,7 @@ emcc -O1 -w $PT $SJLJ -sUSE_SDL=2 -sFULL_ES3 -sGL_ENABLE_GET_PROC_ADDRESS $PORTS
   -s JSPI -s MAX_WEBGL_VERSION=2 \
   -s INITIAL_MEMORY=1610612736 -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=4294967296 \
   -s EXIT_RUNTIME=0 -s ERROR_ON_UNDEFINED_SYMBOLS=0 -s FORCE_FILESYSTEM=1 -s ASSERTIONS=0 \
+  -lopenal \
   -s GL_ASSERTIONS=1 \
   -s INVOKE_RUN=1 \
   -o "$REPO/web/deadcells.js"
