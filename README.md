@@ -48,9 +48,10 @@ produces byte-identical output to the native HashLink run.
                                      │
                           ┌──────────┴───────────┐
                           ▼                       ▼
-                  deadcells-node.js          web/deadcells.js
-                  (NODEFS; reaches            (browser: WebGL2 +
-                   SDL boundary)               XHR-streamed res.pak)
+                   deadcells-node.js          web/deadcells.js
+                   (NODEFS; reaches            (browser main thread:
+                    SDL boundary)               WebGL2 + JSPI, fetch-
+                                                streamed res.pak)
 ```
 
 ---
@@ -99,8 +100,10 @@ scripts/run_web.sh 8088
 ```
 
 `run_web.sh` deliberately **does not launch a browser**. Open
-`http://127.0.0.1:8088/` in Chrome/Firefox (needs SharedArrayBuffer + WebGL2);
-console output is mirrored to `web/browser.log`.
+`http://127.0.0.1:8088/` in **Chrome ≥137** — it needs WebGL2, SharedArrayBuffer
+(COOP/COEP, served automatically) and **WebAssembly JSPI**; Firefox doesn't
+support JSPI yet, so it won't run there. Console output is mirrored to
+`web/browser.log`.
 
 ---
 
@@ -111,13 +114,13 @@ console output is mirrored to `web/browser.log`.
   **37,448** functions, **25,079** types, **503** natives — ≈113 MB of C across
   28 compilation units in ≈2.6 s.
 - Generated C compiles cleanly (0 errors) both natively (≈85 MB binary) and to
-  wasm (≈46–47 MB module).
+  wasm (≈74 MB web module, with libpng/zlib/vorbis codecs + JSPI + wasm SjLj).
 - Full engine boot runs: HashLink runtime init, thread pool, **`res.pak`
   loads** (2 GB, SHA-256 stamp verified) → prints `done.`, Steam shim returns OK.
-- **Browser build runs the entire engine + reaches the render loop** (verified
-  headless Chromium + SwiftShader): WebGL2 context, **all 1291 shaders compiled**,
-  PNG/assets decoded (real `fmt` lib), render targets created at the right size,
-  and the game issues `glDrawElements` calls each frame.
+- **The browser build renders.** Verified headless Chromium + SwiftShader: WebGL2
+  context, all shaders compiled, `res.pak` streamed via async fetch, assets decoded
+  (real `fmt` lib), and the game draws its intro (the Evil Empire splash) — full
+  1280×720 frames, animating, **zero GL errors**.
 - **The GC works.** HashLink's conservative GC can't see pointers held in wasm
   locals; the fix is two-part: `bc2c` (with `GC_ROOTS=1`, default) forces
   GC-managed pointer *registers* onto the linear-memory shadow stack once per
@@ -126,23 +129,43 @@ console output is mirrored to `web/browser.log`.
   objects are compiled `-O0` so their pointer locals also live on the shadow
   stack. Memory is now **bounded (~230 MB, no OOM, no leak)**.
 
-Getting here took a long series of Emscripten/WebGL2 fixes (see `runtime/patches/`
-+ `scripts/40_build_wasm.sh`): `OFFSCREEN_FRAMEBUFFER`; `gl.c` in `HL_GLES` mode;
-per-subsystem `SDL_Init` (HAPTIC unsupported); `PROFILE_ES`; MEMFS save files;
-GLES-3 shader rewriting; the GC rooting above; stubbing OGG decode (OpenAL is
-stubbed, so its decode buffers leaked); and reading the canvas size via
-`emscripten_get_canvas_element_size` (SDL's window size races to 0 under threads).
+### Rendering: why it must run on the browser main thread (JSPI)
+
+The blank-canvas bug turned out **not** to be a GL-semantics problem but a
+**threading** one. SDL2-emscripten always creates the WebGL context on the
+browser **main thread** (its EGL proxies `getContext` there, and OffscreenCanvas
+fails: `getContext` on a transferred canvas throws `InvalidStateError`). When the
+game ran its render loop on a worker (`PROXY_TO_PTHREAD` + `OFFSCREEN_FRAMEBUFFER`),
+per-command GL proxying never reached that context, so `glBufferData` silently
+allocated **0-byte** buffers (no error) and every `glDrawElements` failed with
+`Insufficient buffer size`. A main-thread WebGL self-test allocated correctly,
+which pinned the cause.
+
+The fix is to render on the **main thread**, where the context lives:
+- Dead Cells uses a **blocking** native render loop, so we yield to the page each
+  frame with `emscripten_sleep(16)` at `SDL_GL_SwapWindow`, suspended/resumed via
+  **JSPI** (`-sJSPI`; Chrome ≥137). Asyncify was rejected — it inflates a generated
+  function past V8's 7.65 MB function-size limit (the same wall `--spill-pointers`
+  hit).
+- JSPI can only suspend pure-wasm stacks, but HL's `try/catch` (`setjmp/longjmp`)
+  lowers to JS `invoke_*` trampolines by default → `SuspendError`. Building with
+  **`-sSUPPORT_LONGJMP=wasm`** keeps the whole stack in wasm.
+- Synchronous XHR with `responseType` is forbidden on the main thread, so the
+  game's file reads are turned into **async `fetch`** (`EM_ASYNC_JS`, suspended by
+  JSPI) — see `file.c`'s browser path.
+
+Getting here also took a series of Emscripten/WebGL2 fixes (see `runtime/patches/`
++ `scripts/40_build_wasm.sh`): `gl.c` in `HL_GLES` mode + GLES-3 shader rewriting;
+per-subsystem `SDL_Init` (HAPTIC unsupported); `PROFILE_ES`; MEMFS save files; the
+GC rooting above; stubbing OGG decode (OpenAL is stubbed, so its decode buffers
+leaked); reading the canvas size via `emscripten_get_canvas_element_size`; and a
+`preserveDrawingBuffer` override in the harness so screenshots capture the frame.
 
 **Known issues / WIP**
-- **Nothing renders yet — `glDrawElements` fails GL validation.** DC's `GlDriver`
-  detects **desktop GL** (not GLES) and uses desktop rendering semantics — no
-  VAOs, a cached/global element-buffer binding, likely client-side index arrays.
-  WebGL2 (GLES core) is stricter, so draws fail (`GL_INVALID_OPERATION:
-  glDrawElements: Insufficient buffer size` — no element buffer bound at draw) and
-  the canvas stays blank. The fix is to make DC take the **GLES render path**
-  (its desktop-GL detection fails because Emscripten's `glGetString(GL_VERSION)`
-  is `"OpenGL ES 3.0 (WebGL…)"`, which DC's parser doesn't read as a version), or
-  to emulate the desktop-GL draw state in `gl.c`. This is the main open task.
+- **Audio is stubbed** (OpenAL), and OGG decode is a no-op (`Failed to decode OGG
+  data` is expected).
+- **No frame pacing / input wiring audited** beyond boot + intro rendering;
+  gameplay past the splash/menu is not yet verified.
 - **Rendering is browser-only.** node has no canvas/WebGL, so the node build
   stops at SDL init (`screen is not defined`) — expected.
 
@@ -161,9 +184,9 @@ src/
 runtime/
   patches/        unified diffs applied to vendored sources by 00_setup.sh:
                     gc.c  (disable collection; tolerate unregistered threads)
-                    file.c(explicit-offset I/O: NODEFS/XHR reads, MEMFS writes, fd pinning)
+                    file.c(explicit-offset I/O: async-fetch reads (web) / NODEFS readSync (node), MEMFS writes, fd pinning)
                     fmt.c (build under Emscripten; stub turbojpeg)
-                    sdl.c (per-subsystem SDL_Init; GLES profile for web)
+                    sdl.c (per-subsystem SDL_Init; GLES profile; main-thread render yield for JSPI)
                     gl.c  (HL_GLES mode; rewrite shaders to GLSL ES 3.00)
   ssl_impl.c         real SHA-256/SHA-1 ssl_dgst_make (res.pak stamp check)
 web/

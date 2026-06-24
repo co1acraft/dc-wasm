@@ -4,6 +4,16 @@
 <body style="margin:0;background:#111">
 <canvas id="canvas" width="1280" height="720" style="width:1280px;height:720px;display:block" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
 <script>
+// Force preserveDrawingBuffer so the rendered frame survives compositing (lets
+// screenshots/screencasts capture it; otherwise the canvas reads back black even
+// though it renders fine). Must run before the WebGL context is created.
+(function(){
+  var _gc = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function(type, attrs){
+    if(type && type.indexOf('webgl')>=0){ attrs = attrs || {}; attrs.preserveDrawingBuffer = true; }
+    return _gc.call(this, type, attrs);
+  };
+})();
 // Console -> server (so headless runs can capture output) AND devtools.
 function rlog(s){ try{ fetch('/log',{method:'POST',body:String(s)}); }catch(e){} try{ console.log(s); }catch(e){} }
 window.onerror = function(m,src,l,c,e){ rlog('[onerror] '+m+' @'+src+':'+l+(e&&e.stack?'\n'+e.stack:'')); };

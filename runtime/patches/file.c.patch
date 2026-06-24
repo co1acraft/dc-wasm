@@ -1,6 +1,6 @@
 --- a/file.c
 +++ b/file.c
-@@ -39,6 +39,37 @@
+@@ -39,6 +39,47 @@
  #	define HL_UFOPEN
  #else
  #include <errno.h>
@@ -11,19 +11,29 @@
 +#ifdef __EMSCRIPTEN__
 +#include <emscripten.h>
 +#ifdef DC_BROWSER
-+EM_JS(double, js_xhr_size, (int pathPtr), {
++/* Async fetch (suspended by JSPI): synchronous XHR with responseType='arraybuffer'
++   is forbidden on the browser main thread, so the game must do non-blocking reads.
++   EM_ASYNC_JS suspends the calling (main) thread until the fetch resolves.
++   NOTE: reference HEAPU8 AFTER the await (memory growth can detach the buffer). */
++EM_ASYNC_JS(double, js_xhr_size, (int pathPtr), {
 +  var p = UTF8ToString(pathPtr);
 +  if(p.indexOf('/data/')===0) p=p.substring(6); else if(p.charCodeAt(0)===47) p=p.substring(1);
-+  try { var x=new XMLHttpRequest(); x.open('HEAD','files/'+p,false); x.send();
-+    if(x.status>=200 && x.status<300){ var l=x.getResponseHeader('Content-Length'); return l?parseFloat(l):-1; }
++  try { var resp = await fetch('files/'+p, { method:'HEAD' });
++    if(resp.ok){ var l=resp.headers.get('Content-Length'); return l?parseFloat(l):-1; }
 +    return -1; } catch(e){ return -1; }
 +});
-+EM_JS(int, js_xhr_read, (int pathPtr, int ptr, int len, double pos), {
++EM_ASYNC_JS(int, js_xhr_read, (int pathPtr, int ptr, int len, double pos), {
 +  var p = UTF8ToString(pathPtr);
 +  if(p.indexOf('/data/')===0) p=p.substring(6); else if(p.charCodeAt(0)===47) p=p.substring(1);
-+  try { var x=new XMLHttpRequest(); x.open('GET','files/'+p,false); x.responseType='arraybuffer';
-+    x.setRequestHeader('Range','bytes='+pos+'-'+(pos+len-1)); x.send();
-+    if(x.status===206||x.status===200){ var a=new Uint8Array(x.response); var n=Math.min(a.length,len); HEAPU8.set(a.subarray(0,n),ptr); return n; }
++  try {
++    var resp = await fetch('files/'+p, { headers: { 'Range': 'bytes='+pos+'-'+(pos+len-1) } });
++    if(resp.status===206 || resp.status===200){
++      var ab = await resp.arrayBuffer();
++      var a = new Uint8Array(ab);
++      var n = Math.min(a.length, len);
++      HEAPU8.set(a.subarray(0,n), ptr);
++      return n;
++    }
 +    return -1; } catch(e){ return -1; }
 +});
 +#else
@@ -38,7 +48,7 @@
  #endif
  
  #ifdef HL_WIN_DESKTOP
-@@ -71,11 +102,27 @@
+@@ -71,11 +112,27 @@
  struct _hl_fdesc {
  	void (*finalize)( hl_fdesc * );
  	FILE *f;
@@ -66,14 +76,14 @@
  static void fdesc_finalize( hl_fdesc *f ) {
  	if( f->f ) fclose(f->f);
  }
-@@ -89,10 +136,29 @@
+@@ -89,10 +146,29 @@
  	FILE *f = fopen((char*)name,MODES[mode|(binary?4:0)]);
  #	endif
  	hl_fdesc *fd;
 +#if defined(__EMSCRIPTEN__) && defined(DC_BROWSER)
 +	/* Read-mode opens that miss in MEMFS (f==NULL) are served from the server via
-+	   XHR Range (res.pak, assets). Writes and any file present in MEMFS (e.g. saves)
-+	   use the normal libc path below so they are read/written in the virtual FS. */
++	   HTTP Range fetch (res.pak, assets). Writes and any file present in MEMFS (e.g.
++	   saves) use the normal libc path below so they are read/written in the virtual FS. */
 +	if( f == NULL && (mode == 0 || mode == 3) ) {
 +	  char u[1024]; int i=0; for(;((char*)name)[i]&&i<1023;i++) u[i]=((char*)name)[i]; u[i]=0;
 +	  double zz = js_xhr_size((int)(intptr_t)u);
@@ -96,7 +106,7 @@
  	SET_IS_STD(fd, false);
  	return fd;
  }
-@@ -127,9 +193,12 @@
+@@ -127,9 +203,12 @@
  HL_PRIM int hl_file_read( hl_fdesc *f, vbyte *buf, int pos, int len ) {
  	int ret;
  	if( !f ) return -1;
@@ -111,7 +121,7 @@
  	return ret;
  }
  
-@@ -145,22 +214,31 @@
+@@ -145,22 +224,31 @@
  
  HL_PRIM int hl_file_read_char( hl_fdesc *f ) {
  	unsigned char cc;
@@ -149,7 +159,7 @@
  	return (int)ftell(f->f);
  }
  
-@@ -169,7 +247,12 @@
+@@ -169,7 +257,12 @@
  #	ifdef HL_WIN
  	return _fseeki64(f->f,(__int64)pos,kind) == 0;
  #	else
@@ -163,7 +173,7 @@
  #	endif
  }
  
-@@ -178,7 +261,8 @@
+@@ -178,7 +271,8 @@
  #	ifdef HL_WIN
  	return (double)_ftelli64(f->f);
  #	else

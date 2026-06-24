@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Static server for the Dead Cells wasm harness.
 #  * sends COOP/COEP headers  -> required for SharedArrayBuffer (wasm threads)
-#  * supports HTTP Range       -> the game streams res.pak via XHR Range requests
+#  * supports HTTP Range       -> the game streams res.pak via fetch Range requests
 #  * serves ./ (harness/wasm/js) at /, and the game dir at /files/
 #  * POST /log appends to browser.log (handy for headless capture)
 #
