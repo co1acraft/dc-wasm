@@ -1,6 +1,6 @@
 --- a/file.c
 +++ b/file.c
-@@ -39,6 +39,47 @@
+@@ -39,6 +39,71 @@
  #	define HL_UFOPEN
  #else
  #include <errno.h>
@@ -25,16 +25,40 @@
 +EM_ASYNC_JS(int, js_xhr_read, (int pathPtr, int ptr, int len, double pos), {
 +  var p = UTF8ToString(pathPtr);
 +  if(p.indexOf('/data/')===0) p=p.substring(6); else if(p.charCodeAt(0)===47) p=p.substring(1);
++  if(len<=0) return 0;
++  var cache = globalThis.__hlRangeCache || (globalThis.__hlRangeCache = new Map());
++  var copied = 0, chunkSize = 65536;
 +  try {
-+    var resp = await fetch('files/'+p, { headers: { 'Range': 'bytes='+pos+'-'+(pos+len-1) } });
-+    if(resp.status===206 || resp.status===200){
-+      var ab = await resp.arrayBuffer();
-+      var a = new Uint8Array(ab);
-+      var n = Math.min(a.length, len);
-+      HEAPU8.set(a.subarray(0,n), ptr);
-+      return n;
++    while(copied<len){
++      var offset = pos+copied;
++      var start = Math.floor(offset/chunkSize)*chunkSize;
++      var key = p+':'+start;
++      var pending = cache.get(key);
++      if(pending){
++        cache.delete(key);
++        cache.set(key,pending);
++      } else {
++        var end = start+chunkSize-1;
++        pending = fetch('files/'+p, { headers: { 'Range': 'bytes='+start+'-'+end } })
++          .then(function(resp){
++            if(resp.status!==206 && resp.status!==200) throw new Error('HTTP '+resp.status);
++            return resp.arrayBuffer();
++          })
++          .then(function(ab){ return new Uint8Array(ab); });
++        cache.set(key,pending);
++        while(cache.size>512) cache.delete(cache.keys().next().value);
++      }
++      var a;
++      try { a = await pending; }
++      catch(e) { if(cache.get(key)===pending) cache.delete(key); return copied || -1; }
++      var within = offset-start;
++      var n = Math.min(len-copied,a.length-within);
++      if(n<=0) break;
++      HEAPU8.set(a.subarray(within,within+n),ptr+copied);
++      copied += n;
 +    }
-+    return -1; } catch(e){ return -1; }
++    return copied;
++  } catch(e){ return copied || -1; }
 +});
 +#else
 +EM_JS(int, js_fread, (int emfd, int ptr, int len, double pos), {

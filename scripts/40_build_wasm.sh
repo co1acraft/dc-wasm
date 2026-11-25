@@ -34,6 +34,7 @@ for c in "$DC"/dc_f*.c "$DC"/dc_types.c "$DC"/dc_main.c "$DC"/dc_stubs.c; do
   ccobj "$c" "$WOBJ/$(basename "$c").wo" $INC & wait_slots
 done
 ccobj0 "$REPO/runtime/ssl_impl.c" "$WOBJ/ssl_impl.wo" -I "$HL/src" & wait_slots
+ccobj0 "$REPO/runtime/steam_shim.c" "$WOBJ/steam_shim.wo" -I "$HL/src" & wait_slots
 ccobj0 "$HL/libs/ui/ui_stub.c"    "$WOBJ/ui_stub.wo"  -I "$HL/src" & wait_slots
 ccobj0 "$SDL112/gl.c"             "$WOBJ/sdlgl.wo"  -sUSE_SDL=2 -sFULL_ES3 $SDLINC & wait_slots
 ccobj0 "$SDL112/sdl.c"            "$WOBJ/sdlmain.wo" -sUSE_SDL=2 $SDLINC & wait_slots
@@ -60,7 +61,7 @@ wait
 
 RT_COMMON=$(ls "$WOBJ"/gc.wo "$WOBJ"/std_*.wo "$WOBJ"/pcre2_*.wo)
 # GAME excludes the SDL main object; each link adds its own (node vs browser-yield).
-GAME=$(ls "$WOBJ"/dc_*.wo "$WOBJ"/ssl_impl.wo "$WOBJ"/ui_stub.wo "$WOBJ"/sdlgl.wo "$WOBJ"/fmt.wo "$WOBJ"/fmt_sha1.wo "$WOBJ"/openal.wo)
+GAME=$(ls "$WOBJ"/dc_*.wo "$WOBJ"/ssl_impl.wo "$WOBJ"/steam_shim.wo "$WOBJ"/ui_stub.wo "$WOBJ"/sdlgl.wo "$WOBJ"/fmt.wo "$WOBJ"/fmt_sha1.wo "$WOBJ"/openal.wo)
 
 echo "== link node build =="
 emcc -O1 -w $PT $SJLJ -sUSE_SDL=2 -sFULL_ES3 -sGL_ENABLE_GET_PROC_ADDRESS $PORTS \

@@ -6,13 +6,13 @@
 #  * POST /log appends to browser.log (handy for headless capture)
 #
 # Usage:  python3 serve.py [port] [game_dir]
-#   game_dir defaults to $DC_GAME_DIR or the depot path. res.pak must live there.
+#   game_dir defaults to $DC_GAME_DIR or ../game-data. res.pak must live there.
 import http.server, os, re, sys
 
 WEBROOT  = os.path.dirname(os.path.abspath(__file__))
 GAMEDIR  = (sys.argv[2] if len(sys.argv) > 2 else
             os.environ.get("DC_GAME_DIR",
-            "/home/ubuntu/Documents/deadcells/depots/588653/23762174"))
+            os.path.join(os.path.dirname(WEBROOT), "game-data")))
 LOG = os.path.join(WEBROOT, "browser.log")
 
 class H(http.server.BaseHTTPRequestHandler):

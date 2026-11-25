@@ -1,6 +1,6 @@
 --- a/openal.c
 +++ b/openal.c
-@@ -13,8 +13,19 @@
+@@ -13,8 +13,20 @@
  #else
  	#include <AL/al.h>
  	#include <AL/alc.h>
@@ -10,6 +10,7 @@
 +#endif
 +
 +#ifdef __EMSCRIPTEN__
++#include <string.h>
 +/* Emscripten's OpenAL (libopenal.js -> Web Audio) implements core AL/ALC 1.1 only:
 +   no <AL/alext.h>, no LP*SOFT typedefs, no al(c)GetProcAddress, no ALC_EXT_EFX.
 +   Skipping alext.h leaves ALCImports.h / ALImports.h (all #ifdef SOFT/EFX blocks)
@@ -20,3 +21,47 @@
  
  // ----------------------------------------------------------------------------
  // ALC
+@@ -82,6 +94,13 @@
+ }
+ 
+ HL_PRIM bool HL_NAME(alc_is_extension_present)(ALCdevice *device, vbyte *extname) {
++#ifdef __EMSCRIPTEN__
++	/* Emscripten's OpenAL has no EFX. Report it absent so the engine (Heaps) skips
++	   the whole effects/filters path -- otherwise it creates filters via stubbed EFX
++	   natives and attaches them with AL_DIRECT_FILTER, which raises AL_INVALID_ENUM
++	   and wedges the audio setup, freezing the game at the main menu. */
++	if( extname && strstr((char*)extname, "EFX") ) return false;
++#endif
+ 	return alcIsExtensionPresent(device, (char*)extname) == ALC_TRUE;
+ }
+ 
+@@ -244,6 +263,9 @@
+ }
+ 
+ HL_PRIM bool HL_NAME(al_is_extension_present)(vbyte *extname) {
++#ifdef __EMSCRIPTEN__
++	if( extname && strstr((char*)extname, "EFX") ) return false; /* no EFX in Emscripten OpenAL */
++#endif
+ 	return alIsExtensionPresent((char*)extname) == AL_TRUE;
+ }
+ 
+@@ -336,10 +358,19 @@
+ }
+ 
+ HL_PRIM void HL_NAME(al_sourcei)(unsigned source, int param, int value) {
++#ifdef __EMSCRIPTEN__
++	/* AL_DIRECT_FILTER / AL_AUXILIARY_SEND_FILTER are EFX-only params. Emscripten's
++	   OpenAL has no EFX, so passing them raises AL_INVALID_ENUM and wedges the engine's
++	   audio setup at the main menu. EFX is unsupported here, so skip those attaches. */
++	if( param == 0x20005 || param == 0x20006 ) return;
++#endif
+ 	alSourcei(source, param, value);
+ }
+ 
+ HL_PRIM void HL_NAME(al_source3i)(unsigned source, int param, int value1, int value2, int value3) {
++#ifdef __EMSCRIPTEN__
++	if( param == 0x20005 || param == 0x20006 ) return; /* EFX direct/aux-send filter: skip */
++#endif
+ 	alSource3i(source, param, value1, value2, value3);
+ }
+ 

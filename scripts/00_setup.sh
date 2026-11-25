@@ -7,13 +7,13 @@ echo "== Emscripten =="
 if [ ! -d "$EMSDK" ]; then
   git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$EMSDK"
 fi
-( cd "$EMSDK" && ./emsdk install latest && ./emsdk activate latest )
+( cd "$EMSDK" && ./emsdk install "$EMSDK_VERSION" && ./emsdk activate "$EMSDK_VERSION" )
 
 echo "== HashLink (commit $HL_COMMIT) =="
 if [ ! -d "$HL/.git" ]; then
   git clone https://github.com/HaxeFoundation/hashlink.git "$HL"
 fi
-( cd "$HL" && git checkout -q "$HL_COMMIT" 2>/dev/null || echo "  (using current checkout)" )
+( cd "$HL" && git checkout -q "$HL_COMMIT" )
 
 echo "== Patch HashLink (gc.c, file.c, fmt.c, openal.c) -- see runtime/patches/ =="
 git -C "$HL" checkout -- src/gc.c src/std/file.c libs/fmt/fmt.c libs/openal/openal.c 2>/dev/null || true

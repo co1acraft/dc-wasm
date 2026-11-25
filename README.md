@@ -68,8 +68,13 @@ Everything else (Emscripten, HashLink, SDL2-era sources, Haxe) is fetched into
 `vendor/` by the setup script.
 
 ```bash
+# Optional: defaults to ./game-data (git-ignored).
 export DC_GAME_DIR=/path/to/your/deadcells   # contains hlboot.dat + res.pak
 ```
+
+The setup pins Emscripten SDK 6.0.0 and HashLink commit
+`459601b9972609a89fe5a2e76a8c88666e1818db`; override the SDK with
+`EMSDK_VERSION` if needed.
 
 ---
 
@@ -93,7 +98,7 @@ scripts/30_build_native.sh
 scripts/40_build_wasm.sh
 
 # 5a. run the node build (reaches the SDL init boundary; no rendering in node)
-DC_GAME_DIR=$DC_GAME_DIR node scripts/run_node.js
+node scripts/run_node.js
 
 # 5b. serve the browser build, then open the printed URL yourself
 scripts/run_web.sh 8088
@@ -104,6 +109,19 @@ scripts/run_web.sh 8088
 (COOP/COEP, served automatically) and **WebAssembly JSPI**; Firefox doesn't
 support JSPI yet, so it won't run there. Console output is mirrored to
 `web/browser.log`.
+
+After the title screen appears, dismiss the update panel with Space and choose
+Normal Mode to enter the opening sequence.
+
+If startup reports `[DIALOG] [OpenGL Error]` and the canvas remains `0x0`,
+WebGL context creation failed before the game could render. Check that WebGL2
+is enabled in the browser (`chrome://gpu` in Chrome). On Linux systems without
+working GPU acceleration, try Chromium with software rendering:
+
+```bash
+chromium --use-gl=angle --use-angle=swiftshader \
+  --enable-unsafe-swiftshader http://127.0.0.1:8088/
+```
 
 ---
 
@@ -117,10 +135,11 @@ support JSPI yet, so it won't run there. Console output is mirrored to
   wasm (≈74 MB web module, with libpng/zlib/vorbis codecs + JSPI + wasm SjLj).
 - Full engine boot runs: HashLink runtime init, thread pool, **`res.pak`
   loads** (2 GB, SHA-256 stamp verified) → prints `done.`, Steam shim returns OK.
-- **The browser build renders.** Verified headless Chromium + SwiftShader: WebGL2
-  context, all shaders compiled, `res.pak` streamed via async fetch, assets decoded
-  (real `fmt` lib), and the game draws its intro (the Evil Empire splash) — full
-  1280×720 frames, animating, **zero GL errors**.
+- **Gameplay is reachable in the browser.** Verified with Chromium + SwiftShader:
+  WebGL2 context, all shaders compiled, `res.pak` streamed via async fetch, assets
+  decoded, the opening sequence completed, and the Prisoners' Quarters tutorial
+  responded to keyboard input. This verifies the initial gameplay path, not a
+  complete playthrough or every browser/GPU configuration.
 - **Audio works.** HashLink's `openal` binding is compiled against Emscripten's
   OpenAL (`-lopenal` → Web Audio), and OGG/Vorbis decode is enabled (real libvorbis
   port). Verified: the game opens a **running** `AudioContext` and decodes its OGG
@@ -157,7 +176,8 @@ The fix is to render on the **main thread**, where the context lives:
   **`-sSUPPORT_LONGJMP=wasm`** keeps the whole stack in wasm.
 - Synchronous XHR with `responseType` is forbidden on the main thread, so the
   game's file reads are turned into **async `fetch`** (`EM_ASYNC_JS`, suspended by
-  JSPI) — see `file.c`'s browser path.
+  JSPI). Reads use a bounded 32 MiB LRU of aligned 64 KiB ranges to avoid issuing
+  an HTTP request for every small pack read — see `file.c`'s browser path.
 
 Getting here also took a series of Emscripten/WebGL2 fixes (see `runtime/patches/`
 + `scripts/40_build_wasm.sh`): `gl.c` in `HL_GLES` mode + GLES-3 shader rewriting;
@@ -182,8 +202,9 @@ so the 33 EFX natives remain no-op stubs (the game gates them behind
 - **Audio needs a user gesture.** Browsers start an `AudioContext` suspended until
   the first click/keypress (autoplay policy); click the page to enable sound. (The
   headless test forces `--autoplay-policy=no-user-gesture-required`.)
-- **No frame pacing / input wiring audited** beyond boot + intro rendering;
-  gameplay past the splash/menu is not yet verified.
+- **Browser/GPU compatibility varies.** Some configurations may fail to create a
+  WebGL context; see the troubleshooting note above. Frame pacing and the full
+  control set have not been comprehensively tested.
 - **Rendering is browser-only.** node has no canvas/WebGL, so the node build
   stops at SDL init (`screen is not defined`) — expected.
 
@@ -208,6 +229,7 @@ runtime/
                     gl.c  (HL_GLES mode; rewrite shaders to GLSL ES 3.00)
                     openal.c (skip <AL/alext.h> so it builds against Emscripten core OpenAL -> Web Audio)
   ssl_impl.c         real SHA-256/SHA-1 ssl_dgst_make (res.pak stamp check)
+  steam_shim.c       minimal Steam stats callbacks needed to continue past the menu
 web/
   deadcells.html  canvas harness + console->server log bridge
   serve.py        COOP/COEP + HTTP Range static server (streams res.pak)
@@ -224,7 +246,8 @@ test/
   Min.hx, Test.hx     toy programs used to validate the pipeline
 ```
 
-`vendor/` and `build/` are generated and git-ignored.
+`vendor/`, `build/`, `web/deadcells.js`, `web/deadcells.wasm`, and `game-data/`
+are generated or user-supplied and git-ignored.
 
 ---
 

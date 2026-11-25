@@ -17,6 +17,23 @@
 // Console -> server (so headless runs can capture output) AND devtools.
 function rlog(s){ try{ fetch('/log',{method:'POST',body:String(s)}); }catch(e){} try{ console.log(s); }catch(e){} }
 window.onerror = function(m,src,l,c,e){ rlog('[onerror] '+m+' @'+src+':'+l+(e&&e.stack?'\n'+e.stack:'')); };
+// SDL listens for keyboard on the *window*, so keys only arrive when the page/tab has
+// keyboard focus. Grab focus on load/click/interval, and log focus/key/pointerlock so we
+// can see exactly when keyboard stops reaching the page (DIAG).
+(function(){
+  var c = document.getElementById('canvas');
+  function grab(){ try{ window.focus(); if(c.focus) c.focus({preventScroll:true}); }catch(e){} }
+  window.addEventListener('load', grab);
+  document.addEventListener('pointerdown', grab);
+  document.addEventListener('mousedown', grab);
+  setInterval(grab, 1000);                              // keep trying to hold focus
+  var kn=0;
+  window.addEventListener('keydown', function(e){ if(kn++<40) rlog('[input] keydown reached page: '+e.key+' (focus='+document.hasFocus()+' active='+(document.activeElement&&document.activeElement.tagName)+')'); }, true);
+  window.addEventListener('blur',  function(){ rlog('[focus] WINDOW BLUR'); });
+  window.addEventListener('focus', function(){ rlog('[focus] window focus'); });
+  document.addEventListener('pointerlockchange', function(){ rlog('[focus] pointerLock='+(document.pointerLockElement?'ON':'off')); });
+  document.addEventListener('fullscreenchange', function(){ rlog('[focus] fullscreen='+(document.fullscreenElement?'ON':'off')); });
+})();
 rlog('[harness] start');
 var Module = {
   canvas: document.getElementById('canvas'),

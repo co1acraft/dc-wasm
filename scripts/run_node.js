@@ -11,7 +11,7 @@
 const path = require("path");
 const createDC = require(path.join(__dirname, "..", "build", "deadcells-node.js"));
 const GAME = process.env.DC_GAME_DIR ||
-  "/home/ubuntu/Documents/deadcells/depots/588653/23762174";
+  path.join(__dirname, "..", "game-data");
 
 createDC({ arguments: [], print: console.log, printErr: console.error })
   .then((M) => {

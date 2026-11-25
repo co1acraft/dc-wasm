@@ -1,5 +1,6 @@
 # Toolchains / third-party sources fetched by scripts/00_setup.sh
 /vendor/
+/game-data/
 
 # Build outputs
 /build/

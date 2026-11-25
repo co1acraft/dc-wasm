@@ -198,7 +198,10 @@ static void emit_native_stubs(void){
 		int dup=0; for(int j=0;j<ns;j++) if(!strcmp(seen[j],cn)){dup=1;break;} if(dup) continue; seen[ns++]=strdup(cn);
 		char ps[BS]; int p=0; ps[0]=0;
 		if(fu->nargs==0) snprintf(ps,BS,"void"); else for(int k=0;k<fu->nargs;k++){ char*c=ctype(fu->args[k]); p+=snprintf(ps+p,BS-p,"%s%s p%d",k?",":"",c,k); }
-		if(!strcmp(cn,"steam_init")){ LN("%s %s(%s) { fprintf(stderr,\"[native] steam_init->fake-true\\n\");fflush(stderr); return 1; }",ctype(fu->ret),cn,ps); continue; }
+		/* steam_init + the stats/callback pump come from runtime/steam_shim.c: it fires
+		   the async events the title-screen modal waits on (otherwise it hangs, dimming
+		   the screen and capturing input). Other steam_* stay log-once no-op stubs. */
+		if(!strcmp(cn,"steam_init")||!strcmp(cn,"steam_run_callbacks")||!strcmp(cn,"steam_request_stats")||!strcmp(cn,"steam_request_global_stats")) continue;
 		if(fu->ret->kind==HVOID) LN("%s %s(%s) { static int _o=0; if(!_o){_o=1;fprintf(stderr,\"[native] %s\\n\");fflush(stderr);} }",ctype(fu->ret),cn,ps,cn);
 		else LN("%s %s(%s) { static int _o=0; if(!_o){_o=1;fprintf(stderr,\"[native] %s\\n\");fflush(stderr);} return (%s)0; }",ctype(fu->ret),cn,ps,cn,ctype(fu->ret));
 	}
