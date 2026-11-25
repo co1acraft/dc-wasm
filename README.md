@@ -1,4 +1,4 @@
-# dc-wasm
+# deadcells-wasm
 
 Porting **Dead Cells** (a [HashLink](https://hashlink.haxe.org/) / [Heaps.io](https://heaps.io/)
 game) to **WebAssembly**, so it can run in a browser.
