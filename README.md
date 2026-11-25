@@ -1,5 +1,9 @@
 # deadcells-wasm
 
+> [!WARNING]
+> this completely vibecoded and there may be issues
+> who knows
+
 Porting **Dead Cells** (a [HashLink](https://hashlink.haxe.org/) / [Heaps.io](https://heaps.io/)
 game) to **WebAssembly**, so it can run in a browser.
 
